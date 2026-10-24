@@ -27,7 +27,11 @@ internal sealed class TrayController : IDisposable
     private readonly DispatcherQueueTimer _holdTimer;
     private readonly TrayIcon _tray = new();
     private readonly FlyoutWindow _flyout = new();
-    private readonly PauseReminder _pause = new();
+    private readonly PauseReminder _pause;
+    private readonly MicReminder _micReminder;
+    private readonly Notifications _notifications;
+    private readonly DispatcherQueueTimer _pauseTimer;
+    private readonly DispatcherQueueTimer _micTimer;
     private readonly MicController _mic;
     private readonly AppClient _app;
     private readonly AppIcons _icons = new();
@@ -89,7 +93,29 @@ internal sealed class TrayController : IDisposable
         _dayTimer.IsRepeating = true;
         _dayTimer.Interval = TimeSpan.FromSeconds(15);
         _dayTimer.Tick += (_, _) => _ = LoadDay();
-        _settings.Changed += (_, _) => Render();
+        // The reminders (TRAY.md section 5): one timer each, armed for the next due reminder.
+        _pause = new PauseReminder(settings.Current.PauseReminderMinutes);
+        _micReminder = new MicReminder(settings.Current.MicReminderMinutes);
+        _pauseTimer = _dispatcher.CreateTimer();
+        _pauseTimer.IsRepeating = false;
+        _pauseTimer.Tick += (_, _) => ApplyReminder(ReminderKind.Pause, _pause.Fire(Now));
+        _micTimer = _dispatcher.CreateTimer();
+        _micTimer.IsRepeating = false;
+        _micTimer.Tick += (_, _) => ApplyReminder(ReminderKind.Mic, _micReminder.Fire(Now));
+        _notifications = new Notifications(_dispatcher, LogOnce);
+        _notifications.ClearStale();
+        _notifications.Invoked += (_, hit) => OnReminderAction(hit.Kind, hit.Action);
+        _notifications.Opened += (_, _) => ShowFlyout();
+
+        _settings.Changed += (_, _) =>
+        {
+            var s = _settings.Current;
+            if (s.PauseReminderMinutes != _pause.Minutes)
+                ApplyReminder(ReminderKind.Pause, _pause.SetMinutes(s.PauseReminderMinutes, Now));
+            if (s.MicReminderMinutes != _micReminder.Minutes)
+                ApplyReminder(ReminderKind.Mic, _micReminder.SetMinutes(s.MicReminderMinutes, Now));
+            Render();
+        };
 
         _tray.Activated += (_, _) => ToggleFlyout();
         _tray.ContextMenuRequested += (_, at) => ShowMenu(at);
@@ -168,6 +194,9 @@ internal sealed class TrayController : IDisposable
         _stopConfirmTimer.Stop();
         _holdTimer.Stop();
         _dayTimer.Stop();
+        _pauseTimer.Stop();
+        _micTimer.Stop();
+        _notifications.Dispose();
         _tray.Dispose();
         _app.Dispose();
         _flyout.Destroy();
@@ -177,6 +206,54 @@ internal sealed class TrayController : IDisposable
     }
 
     private long Now => _clock.ElapsedMilliseconds;
+
+    /// <summary>
+    /// Applies a reminder's effect (withdraw and/or show, the latter replacing
+    /// any shown one of its kind), then arms its one timer for the next due reminder.
+    /// </summary>
+    private void ApplyReminder(ReminderKind kind, ReminderEffect effect)
+    {
+        if (effect.Withdraw)
+            _notifications.Withdraw(kind);
+        if (effect.Show is { } body)
+            _notifications.Show(kind == ReminderKind.Pause ? ReminderNotice.Pause(body) : ReminderNotice.Mic(body));
+        var (timer, due) = kind == ReminderKind.Pause ? (_pauseTimer, _pause.DueAt) : (_micTimer, _micReminder.DueAt);
+        timer.Stop();
+        if (PauseReminder.TimerDelay(due, Now) is { } delay)
+        {
+            timer.Interval = TimeSpan.FromMilliseconds(Math.Max(1, delay));
+            timer.Start();
+        }
+    }
+
+    /// <summary>A reminder's button: Resume (as the flyout's), Choose microphone, or Stop reminding.</summary>
+    private void OnReminderAction(ReminderKind kind, ReminderAction action)
+    {
+        switch (action)
+        {
+            case ReminderAction.Resume:
+                _ = RunCommand("resume");
+                break;
+            case ReminderAction.ChooseMicrophone:
+                // Only shows the flyout with the input list; picking is the flyout's own path.
+                ShowFlyout();
+                if (_status?.Mic is { Available: true })
+                {
+                    _expanded = "input";
+                    Render();
+                }
+                break;
+            case ReminderAction.StopReminding:
+                ApplyReminder(kind, kind == ReminderKind.Pause ? _pause.Suppress() : _micReminder.Suppress());
+                break;
+        }
+    }
+
+    private void ShowFlyout()
+    {
+        if (!_flyout.IsOpen)
+            _flyout.ShowAt(_tray.Bounds());
+    }
 
     private void ToggleFlyout()
     {
@@ -442,16 +519,21 @@ internal sealed class TrayController : IDisposable
     private async Task Poll()
     {
         _polling = true;
+        // Only a status or "not running" says whether the session is still paused
+        // (or the microphone quiet); any other poll failure leaves the reminders as they were.
+        var observed = false;
         try
         {
             _status = await _client.StatusAsync(_cts.Token);
             _running = true;
             _pollError = null;
+            observed = true;
         }
         catch (ControlException e)
         {
             _status = null;
             _running = false;
+            observed = e.NotRunning;
             // "Not running" is the normal idle case: nothing logged, no error shown.
             _pollError = e.NotRunning ? null : StatusModel.ErrorText(e);
             if (!e.NotRunning)
@@ -465,7 +547,11 @@ internal sealed class TrayController : IDisposable
         {
             _polling = false;
         }
-        _pause.Observe(_running ? _status?.State : null, Now);
+        if (observed)
+        {
+            ApplyReminder(ReminderKind.Pause, _pause.Observe(_running ? _status?.State : null, Now));
+            ApplyReminder(ReminderKind.Mic, _micReminder.Observe(_running ? _status : null, Now));
+        }
         _mic.UpdateStatus(_status, _running);
         Render();
         if (_pollAgain)
@@ -519,6 +605,6 @@ internal sealed class TrayController : IDisposable
     private void LogOnce(string message)
     {
         if (_logged.Count < 32 && _logged.Add(message))
-            Debug.WriteLine($"whatdidido-tray: {message}");
+            TrayLog.Write(message);
     }
 }

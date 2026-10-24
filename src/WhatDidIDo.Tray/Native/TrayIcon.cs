@@ -181,7 +181,7 @@ internal sealed unsafe class TrayIcon : IDisposable
         catch (Exception e)
         {
             // Never let an exception cross the native frame.
-            System.Diagnostics.Debug.WriteLine($"tray: {e.GetType().Name}");
+            TrayLog.Write($"tray icon: {e.GetType().Name}");
         }
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }

@@ -6,7 +6,7 @@ counterpart of [whatdidido-gnome](https://github.com/hpst3r/whatdidido-gnome).
 It talks to the work session's local control API (`/control/v1/*`), found
 through `%LOCALAPPDATA%\whatdidido\control.json`.
 
-Status: pre-alpha, slices `tray-core`, `tray-popover` and `tray-app` of [docs/TRAY.md](docs/TRAY.md).
+Status: pre-alpha, slices `tray-core`, `tray-popover`, `tray-app` and `tray-reminders` of [docs/TRAY.md](docs/TRAY.md).
 
 - **Tray icon:** a glyph per state (recording in red, paused in amber,
   stopped, starting/stopping, reconnecting, failed, not running), in the
@@ -58,8 +58,32 @@ On a Windows read server, start it with `TZ` set to your IANA zone (for
 example `America/Los_Angeles`): without `/etc/localtime` it otherwise uses
 UTC days (TRAY.md open point c).
 
-Still to come (TRAY.md section 7): the pause and microphone reminders, a
-settings window and start at login.
+## Reminders
+
+As in whatdidido-gnome, as Windows notifications:
+
+- **Recording is paused** ("Paused for N minutes. Screenshots, audio and
+  window activity aren't being recorded.") after `pauseReminderMinutes`
+  (default 10) paused, and again every that many minutes; **Resume** or
+  **Stop reminding** (until the session leaves paused).
+- **Check your microphone** ("No speech transcribed from USB headset for N
+  minutes.") while recording with the microphone on and the server
+  transcribing, when no speech was transcribed for `micReminderMinutes`
+  (default 10); **Choose microphone** (opens the flyout's Input list) or
+  **Stop reminding** (until speech, another microphone or leaving
+  recording).
+
+Each new reminder replaces the last; leaving the state withdraws it; 0 turns
+a reminder off. Counting starts at the first poll that saw the state (the
+server reports no start time) on the monotonic clock. Do Not Disturb
+applies. The tray removes its reminders when it quits.
+
+Windows knows the tray as `whatdidido.windows.tray`, registered per user
+under `HKCU\Software\Classes\AppUserModelId` when it starts (that key can
+be deleted after removing the tray). Errors go to
+`%LOCALAPPDATA%\whatdidido-windows	ray.log`.
+
+Still to come (TRAY.md section 7): a settings window and start at login.
 
 ## Build and run
 
@@ -85,7 +109,8 @@ can be checked (for example with UI Automation) without a tray click.
   `Models/` ports the extension's pure modules (`StatusModel` = `model.js`,
   `PopoverModel` = `popover_model.js`, `MicModel`/`MicController` =
   `mic_model.js`, `DayModel` = `day_model.js`, `PauseReminder` =
-  `pause_reminder.js`) with the same strings and rules; `App/` finds and
+  `pause_reminder.js`, `MicReminder` = `mic_reminder.js`) with the same
+  strings and rules; `App/` finds and
   talks to the app server; `Settings/` reads and writes the settings file.
 - `src/WhatDidIDo.Tray` (WinUI 3): `TrayController` polls and renders;
   `FlyoutWindow` draws a `PopoverView`; `Native/` holds the

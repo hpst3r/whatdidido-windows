@@ -1,6 +1,6 @@
 # Windows tray control (contract)
 
-Status: draft 2026-10-23; slices `tray-core`, `tray-popover` and `tray-app` written (section 7). Later
+Status: draft 2026-10-24; slices `tray-core`, `tray-popover`, `tray-app` and `tray-reminders` written (section 7). Later
 changes are numbered amendments at the end.
 
 Goal: the Windows counterpart of the GNOME top-bar extension
@@ -51,7 +51,10 @@ to the app server, exactly as the extension does. This is whatdidido
    documented keys.
 6. Errors are `ControlException {Status, Code, NotRunning}` with the extension's
    texts (`model.js` `errorText`). The token never appears in an error, a
-   log line or the UI.
+   log line or the UI. The tray's own errors go, once per distinct message,
+   to `%LOCALAPPDATA%\whatdidido-windows	ray.log` (capped at 256 KiB,
+   the previous file kept as `tray.log.1`), never with a window title or a
+   microphone label.
 
 ## 3. Tray icon
 
@@ -116,10 +119,44 @@ while it is open, and after an Assign; never while it is closed.
 
 The pause reminder and the microphone reminder follow the extension
 (`pause_reminder.js`, `mic_reminder.js`; README "Pause reminder" and
-"Microphone reminder"), on the monotonic clock (`Stopwatch`). They are app
-notifications (`AppNotificationManager`) with the buttons **Resume** /
+"Microphone reminder"), on the monotonic clock (`Stopwatch`), ported as
+`PauseReminder` and `MicReminder` with the same rules and texts. They are
+Windows toast notifications with the buttons **Resume** /
 **Stop reminding** and **Choose microphone** / **Stop reminding**; each new
-one replaces the last (same tag), and leaving the state removes it.
+one replaces the last (tag `pause` or `mic`, group `whatdidido-reminders`),
+and leaving the state removes it.
+
+1. **Only a status or "not running" moves them.** Any other poll failure
+   (a timeout, a rejected token) leaves both reminders as they were.
+2. **One timer each**, armed for the reminder's next due time after every
+   observation, button and settings change.
+3. **Priority high**: a banner, kept at the top of the notification center;
+   Do Not Disturb still applies (the extension's high urgency).
+4. **Buttons.** Resume sends the flyout's resume (a failure is the
+   flyout's notice and is logged once). Choose microphone only opens the
+   flyout, with the Input list expanded when the session offers a
+   microphone. Stop reminding suppresses that reminder. A click on the
+   notification's body opens the flyout. Arguments are `reminder` and
+   `action` (names only; each reminder accepts only its own buttons).
+5. **The API is `Windows.UI.Notifications`, not the Windows App SDK's
+   `AppNotificationManager`** (amended in this slice): the latter needs the
+   Windows App Runtime's Singleton package, which a self-contained,
+   installer-free tray (T3) does not have, and on this machine
+   `AppNotificationManager.IsSupported()` was false. An unpackaged app names
+   itself to the notification platform with an AppUserModelID, here
+   `whatdidido.windows.tray`, registered at start under
+   `HKCU\Software\Classes\AppUserModelId` (display name `whatdidido` and
+   the app icon); the process takes it as its explicit AppUserModelID. A
+   click comes back through the toast's own `Activated` event while the tray
+   runs (no COM activator; a click after the tray quit does nothing, and
+   there is nothing left to click: see the next sentence). Reminders left by
+   an earlier run (a crash) are removed at start, and the tray removes its
+   own when it quits, so no reminder outlives the process that would act on
+   it. Where the platform refuses, the reminders still count and show
+   nothing; the reason is logged.
+6. Changing `pauseReminderMinutes` or `micReminderMinutes` applies at once
+   (the reminders' `SetMinutes`); there is no settings window yet, so for
+   now that is an edit of the settings file before the tray starts.
 
 ## 6. Settings
 
@@ -138,7 +175,7 @@ only when the user turns it on in Settings.
 | `tray-core` (written) | Solution, Core: control file, `ControlClient`, `StatusModel` (`model.js`), tests against a loopback fake. App: tray icon per state with tooltip, flyout with the status card, notices, footer and Stop confirmation. | the icon follows a live session through Start, Pause, Resume and Stop |
 | `tray-popover` (written) | `MicModel` and `MicController` (`mic_model.js`, issue #1 rules), `ControlClient.SetMicOnAsync` and the typed inventory, `PopoverModel` tiles, input picker and interval, `SettingsStore` (section 6). App: the tiles, the input picker, the slider. | done live against a stateful fake of `/control/v1` (Windows sessions have no audio yet): the issue #1 prompt, a pick that turns the mic on, a switch while live, off and on with the saved choice, a disconnected choice that sends nothing; slider by drag, click and keys |
 | `tray-app` (written) | `AppClient` and `AppUrls` (POPOVER.md section 3 and Amendments 1 and 2: discovery from the session's `/day` redirect, the `appUrl` override, no redirects, the error envelope), `TimesheetDay`, `DayModel` (day.ts, palette.ts with the `win` skin's colors), `PopoverModel` Now, Today, Open and the links; request bodies written without reflection (`JsonBody`). App: the Now card with Assign, the Today bars, Open whatdidido, the PHI tile's link. | done live against a real read server with `--timesheet` (discovery through a real session's `/day`, the day, an Assign the server stored, a refused body); the flyout driven headless with UI Automation against a fake app server (Now card, bars, ticket pick, Assign, a `409 conflict`) |
-| `tray-reminders` | Both reminders as app notifications. | |
+| `tray-reminders` (written) | `MicReminder` (`mic_reminder.js`), `ReminderNotice` (texts, buttons, argument encoding), the app's `Notifications` over `Windows.UI.Notifications`, the controller's timers and button actions, `tray.log`. | done live with the delays at 1 minute against a stateful fake, read from the notification platform's own database (`wpndatabase.db`): the mic reminder shown with its buttons after a minute of recording with the mic on, withdrawn by a pause, the pause reminder a minute later, its repeat replacing it, withdrawn by a resume, a reminder left by a killed tray removed at the next start; the shell registered the tray with toasts and banners on. Not seen: a banner on screen, and a button click (open point e) |
 | `tray-settings` | Settings window, start at login. | |
 | `tray-ci` | A `windows-latest` workflow: build, Core tests, a zipped self-contained folder as the artifact. | |
 
@@ -161,3 +198,9 @@ only when the user turns it on in Settings.
   whatdidido's `win-embedded` portability work.
 - **d. Opening links** (`Process.Start` with the shell) was not exercised
   live; it is the standard URL launch.
+- **e. Reminder button clicks** were not exercised: no banner appeared to
+  UI Automation on the test machine (Windows Server 2025; possibly Do Not
+  Disturb), and the notification center was not opened on the user's
+  desktop. The toast's `Activated` event is the classic desktop-toast
+  pattern; if it does not fire for a registry-only AppUserModelID, the fix
+  is a COM activator (`CustomActivator` under the same key).

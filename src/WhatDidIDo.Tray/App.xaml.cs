@@ -20,8 +20,14 @@ public partial class App : Application
         InitializeComponent();
         UnhandledException += (_, e) =>
         {
-            System.Diagnostics.Debug.WriteLine($"unhandled: {e.Exception.GetType().Name}");
+            Native.TrayLog.Write($"unhandled: {e.Exception.GetType().Name}: {e.Exception.HResult:X8}");
             e.Handled = true;
+        };
+        // The controller's fire-and-forget tasks: a fault would otherwise vanish.
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Native.TrayLog.Write($"unobserved: {e.Exception.InnerException?.GetType().Name ?? e.Exception.GetType().Name}");
+            e.SetObserved();
         };
     }
 
