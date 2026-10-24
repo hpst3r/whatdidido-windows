@@ -2,6 +2,26 @@ using WhatDidIDo.Tray.Core.Control;
 
 namespace WhatDidIDo.Tray.Core.Tests;
 
+public class JsonBodyTests
+{
+    [Fact]
+    public void Write_KeepsOrderAndTypes()
+    {
+        var json = JsonBody.Write([new("start", "a\"b"), new("n", 5), new("billable", false)]);
+        var root = System.Text.Json.JsonDocument.Parse(json).RootElement;
+        Assert.Equal(["start", "n", "billable"], root.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("a\"b", root.GetProperty("start").GetString());
+        Assert.EndsWith("""
+            "n":5,"billable":false}
+            """, json, StringComparison.Ordinal);
+        Assert.Equal("{}", JsonBody.Write([]));
+    }
+
+    [Fact]
+    public void Write_RefusesOtherValues() =>
+        Assert.Throws<ArgumentException>(() => JsonBody.Write([new("x", 1.5)]));
+}
+
 public class ControlFileTests
 {
     private const string Token = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";

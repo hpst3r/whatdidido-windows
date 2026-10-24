@@ -33,6 +33,15 @@ internal sealed class FakeControlServer : IAsyncDisposable
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
     public string BaseUrl => $"http://127.0.0.1:{Port}";
 
+    /// <summary>
+    /// False: a plain loopback server (the app server) with no control guards.
+    /// The control server's <c>/day</c> page is never guarded either.
+    /// </summary>
+    public bool ControlRules { get; set; } = true;
+
+    /// <summary>Extra response headers for a request target, e.g. a Location.</summary>
+    public Func<string, IReadOnlyDictionary<string, string>?> ResponseHeaders { get; set; } = _ => null;
+
     /// <summary>The route handler after the guards: (method, path, body) → (status, JSON).</summary>
     public Func<string, string, string, (int Status, string Json)> Handler { get; set; } = (_, _, _) => (404, """{"error":"not_found"}""");
 
@@ -48,8 +57,14 @@ internal sealed class FakeControlServer : IAsyncDisposable
     public string ControlJson(string? token = null) =>
         $$"""{"version": 1, "base_url": "{{BaseUrl}}", "token": "{{token ?? Token}}"}""";
 
+    private bool _disposed;
+
     public async ValueTask DisposeAsync()
     {
+        // A test may stop the server early (nothing listening any more).
+        if (_disposed)
+            return;
+        _disposed = true;
         await _stop.CancelAsync();
         _listener.Stop();
         try
@@ -89,10 +104,13 @@ internal sealed class FakeControlServer : IAsyncDisposable
                 return;
             lock (_requests)
                 _requests.Add(request);
-            var (status, json) = Guard(request) ?? Handler(request.Method, request.Target, request.Body);
+            var guarded = ControlRules && request.Target != "/day";
+            var (status, json) = (guarded ? Guard(request) : null) ?? Handler(request.Method, request.Target, request.Body);
             var body = Encoding.UTF8.GetBytes(json);
+            var extra = string.Concat((ResponseHeaders(request.Target) ?? new Dictionary<string, string>())
+                .Select(kv => $"{kv.Key}: {kv.Value}\r\n"));
             var head = $"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n"
-                + $"Content-Length: {body.Length}\r\nConnection: close\r\n\r\n";
+                + $"{extra}Content-Length: {body.Length}\r\nConnection: close\r\n\r\n";
             await stream.WriteAsync(Encoding.ASCII.GetBytes(head));
             await stream.WriteAsync(body);
         }

@@ -1,6 +1,6 @@
 # Windows tray control (contract)
 
-Status: draft 2026-10-23; slices `tray-core` and `tray-popover` written (section 7). Later
+Status: draft 2026-10-23; slices `tray-core`, `tray-popover` and `tray-app` written (section 7). Later
 changes are numbered amendments at the end.
 
 Goal: the Windows counterpart of the GNOME top-bar extension
@@ -66,9 +66,8 @@ to the app server, exactly as the extension does. This is whatdidido
 3. The tooltip is the extension's accessible name: `whatdidido: Recording,
    microphone on`.
 4. Left click or Enter toggles the flyout. Right click opens a small context
-   menu: the primary action (Start, Pause or Resume), Open session page
-   (Open whatdidido once `tray-app` finds the app server), Settings (with
-   `tray-settings`), Quit.
+   menu: the primary action (Start, Pause or Resume), Open session page,
+   Settings (with `tray-settings`), Quit.
 5. After Explorer restarts (`TaskbarCreated`) the icon is added again.
 
 ## 4. Flyout
@@ -85,8 +84,8 @@ into `PopoverModel` with the same names. Windows rendering:
 | Tiles | Quick Settings tiles, 2 per row in the extension's order (Microphone, PHI guard, Active window), glyph beside title and one-line subtitle: Microphone a `ToggleButton` (accent fill when on), PHI guard a `Button` with an amber subtitle, Active window a `ToggleButton` that takes no input (T8). Insensitive tiles are dimmed. |
 | Input | a row button, "Input" and the active microphone (else the saved choice, else "Choose…") with a chevron; open, a `RadioButton` per source below it, the saved choice checked. Rebuilt only when the sources change, so polling keeps focus. |
 | Screenshot interval | label and value on a card, a `Slider` over the 14 stops with inline ticks; a pointer drag commits once on release, a click on the track at once, arrow keys 600 ms after the last step; closing the flyout commits a pending step (POPOVER.md Amendment 2.2); a saved stop is held for 3 s until a status reports it (Amendment 2.3) |
-| Now | the app's icon from its executable when the `app_id` is a path, else initials; ticket `ComboBox` and an accent Assign `Button` |
-| Today | a row of `Rectangle` bars, tooltips on hover and focus |
+| Now | a card: "NOW", the focused app and title as a button (opens the Timesheet); the app's icon from a running process with that executable name (the session reports `app_id` as the file name, `Code.exe`), else its initials on an accent square; the unassigned stretch with a ticket picker (a row button opening `RadioButton`s, "<ticket> · <client>") and an accent Assign `Button`, or the last entry; dimmed unless recording |
+| Today | "Today" and the range (the hovered or focused bar's time and ticket instead), a row of bar `Button`s colored from the app's `win` skin palette (ticket colors, `--warn` paused, `--faint` other states, the system accent for active and unassigned); a click opens the Timeline at that time. Rebuilt only when the bars change; a focused bar hands focus to the same index (Amendment 2.5) |
 | Open whatdidido | an accent `Button`, full width |
 | Footer | samples and pending; Stop session as a text button in the system critical color, turning into Cancel and Stop now for 4 s |
 
@@ -104,8 +103,12 @@ while it is open, and after an Assign; never while it is closed.
 ### 4.1 Windows differences in `tray-popover`
 
 - The flyout's notice (a failed action) clears when the flyout closes.
-- The PHI guard tile is shown with its count but stays insensitive until
-  `tray-app` finds the app server it links to.
+- Picking a ticket moves keyboard focus to Assign (the list closes under the
+  focused radio button); the input and ticket lists react to `Checked`, so
+  a screen reader's UI Automation select works like a click.
+- The Now card's app icon needs the app to be running as this user
+  (`Process.MainModule`); other apps show initials, as on GNOME without a
+  `.desktop` match.
 - The mic badge on the tray icon is busy at 16 px (100 % scale); a cleaner
   composition is later polish.
 
@@ -134,7 +137,7 @@ only when the user turns it on in Settings.
 | --- | --- | --- |
 | `tray-core` (written) | Solution, Core: control file, `ControlClient`, `StatusModel` (`model.js`), tests against a loopback fake. App: tray icon per state with tooltip, flyout with the status card, notices, footer and Stop confirmation. | the icon follows a live session through Start, Pause, Resume and Stop |
 | `tray-popover` (written) | `MicModel` and `MicController` (`mic_model.js`, issue #1 rules), `ControlClient.SetMicOnAsync` and the typed inventory, `PopoverModel` tiles, input picker and interval, `SettingsStore` (section 6). App: the tiles, the input picker, the slider. | done live against a stateful fake of `/control/v1` (Windows sessions have no audio yet): the issue #1 prompt, a pick that turns the mic on, a switch while live, off and on with the saved choice, a disconnected choice that sends nothing; slider by drag, click and keys |
-| `tray-app` | `AppClient` (POPOVER.md section 3 and Amendment 2), `DayModel`, Now card, Today bars, links. | Assign works against a read server with `--timesheet` |
+| `tray-app` (written) | `AppClient` and `AppUrls` (POPOVER.md section 3 and Amendments 1 and 2: discovery from the session's `/day` redirect, the `appUrl` override, no redirects, the error envelope), `TimesheetDay`, `DayModel` (day.ts, palette.ts with the `win` skin's colors), `PopoverModel` Now, Today, Open and the links; request bodies written without reflection (`JsonBody`). App: the Now card with Assign, the Today bars, Open whatdidido, the PHI tile's link. | done live against a real read server with `--timesheet` (discovery through a real session's `/day`, the day, an Assign the server stored, a refused body); the flyout driven headless with UI Automation against a fake app server (Now card, bars, ticket pick, Assign, a `409 conflict`) |
 | `tray-reminders` | Both reminders as app notifications. | |
 | `tray-settings` | Settings window, start at login. | |
 | `tray-ci` | A `windows-latest` workflow: build, Core tests, a zipped self-contained folder as the artifact. | |
@@ -148,3 +151,13 @@ only when the user turns it on in Settings.
 - **b. Starting the session.** "Capture not running" could offer to start
   the work session once whatdidido `docs/WINDOWS.md` open point c (a
   scheduled task at logon) exists.
+- **c. The read server on Windows** (whatdidido, found in `tray-app`'s live
+  check). Its day zone comes from `--day-summaries-timezone`, `TZ` or
+  `/etc/localtime`, else UTC; Windows has no `/etc/localtime`, so without
+  `TZ` its days are UTC days and the tray's "today" (this machine's date)
+  is the wrong one in the evening. And `--app-ui` fails at startup
+  (`os.O_NOFOLLOW` in `web/app_ui.py`), so Open whatdidido and the links
+  have no `/app/` to open on a Windows read server yet. Both belong to
+  whatdidido's `win-embedded` portability work.
+- **d. Opening links** (`Process.Start` with the shell) was not exercised
+  live; it is the standard URL launch.

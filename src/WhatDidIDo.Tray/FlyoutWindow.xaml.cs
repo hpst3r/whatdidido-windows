@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Windows.Graphics;
+using WhatDidIDo.Tray.Core.App;
 using WhatDidIDo.Tray.Core.Models;
 using WhatDidIDo.Tray.Native;
 using static WhatDidIDo.Tray.Native.NativeMethods;
@@ -50,8 +51,20 @@ public sealed partial class FlyoutWindow : Window
     /// <summary>The input picker opens ("input") or closes (null).</summary>
     public event EventHandler<string?>? ExpandRequested;
 
-    /// <summary>The PHI guard tile was clicked.</summary>
-    public event EventHandler? PhiRequested;
+    /// <summary>A link in the app was clicked (PHI tile, Now card, a Today bar, Open whatdidido).</summary>
+    public event EventHandler<AppLink>? LinkRequested;
+
+    /// <summary>The ticket picker opens ("ticket") or closes (null); see also <see cref="ExpandRequested"/>.</summary>
+    public event EventHandler<string>? TicketPicked;
+
+    /// <summary>Assign was clicked with this body.</summary>
+    public event EventHandler<AssignmentBody>? AssignRequested;
+
+    /// <summary>A Today bar is hovered or focused (its index), or none is (null).</summary>
+    public event EventHandler<int?>? HoverBarChanged;
+
+    /// <summary>Resolves an app's executable name to its icon, or null (initials are shown).</summary>
+    public Func<string, Task<Microsoft.UI.Xaml.Media.ImageSource?>>? AppIcon { get; set; }
 
     /// <summary>The slider shows another stop (a drag, or a key step not yet committed).</summary>
     public event EventHandler<int>? IntervalChanging;
@@ -92,6 +105,11 @@ public sealed partial class FlyoutWindow : Window
             Hide();
         };
         Root.SizeChanged += (_, _) => Place();
+        Root.ActualThemeChanged += (_, _) =>
+        {
+            _shownBars = [];
+            ThemeChanged?.Invoke(this, EventArgs.Empty);
+        };
 
         // A pointer drag commits on release; the slider handles the pointer
         // events itself, so listen to handled ones too.
@@ -135,6 +153,12 @@ public sealed partial class FlyoutWindow : Window
     }
 
     public bool IsOpen { get; private set; }
+
+    /// <summary>The flyout follows Windows' app theme; the Today bars' colors depend on it.</summary>
+    public bool IsDark => Root.ActualTheme == ElementTheme.Dark;
+
+    /// <summary>Windows switched between light and dark.</summary>
+    public event EventHandler? ThemeChanged;
 
     /// <summary>When the flyout last hid; a tray click right after a hide-on-deactivate is that same click.</summary>
     public long HiddenAt { get; private set; }
@@ -233,7 +257,7 @@ public sealed partial class FlyoutWindow : Window
         PausedMark.Visibility = Show(status.Mark == StatusMark.Paused);
         IdleDot.Visibility = Show(status.Mark == StatusMark.Idle);
         StatusGlyph.Visibility = Show(status.Mark is StatusMark.Power or StatusMark.Info);
-        StatusGlyph.Glyph = status.Mark == StatusMark.Info ? "" : "";
+        StatusGlyph.Glyph = status.Mark == StatusMark.Info ? "\uE946" : "\uE7E8";
         StatusTitle.Text = status.Title;
         StatusSubtitle.Text = status.Subtitle;
         StatusCard.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[
@@ -245,7 +269,7 @@ public sealed partial class FlyoutWindow : Window
             PrimaryButton.Tag = primary.Command;
             PrimaryButton.IsEnabled = primary.Sensitive;
             PrimaryButton.Style = (Style)Application.Current.Resources[primary.Accent ? "AccentButtonStyle" : "DefaultButtonStyle"];
-            PrimaryGlyph.Glyph = primary.Command == "pause" ? "" : "";
+            PrimaryGlyph.Glyph = primary.Command == "pause" ? "\uE769" : "\uE768";
             ToolTipService.SetToolTip(PrimaryButton, primary.AccessibleName);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PrimaryButton, primary.AccessibleName);
         }
@@ -262,6 +286,9 @@ public sealed partial class FlyoutWindow : Window
         RenderTiles(view.Tiles);
         RenderInput(view.Input);
         RenderInterval(view.Interval);
+        RenderNow(view.Now);
+        RenderToday(view.Today);
+        OpenButton.IsEnabled = view.Open.Sensitive;
 
         var footer = view.Footer;
         FooterBar.Visibility = Show(footer.Visible);
@@ -325,7 +352,11 @@ public sealed partial class FlyoutWindow : Window
                 MicToggleRequested?.Invoke(this, !on);
             };
             _phiTile = MakeTile(new Button());
-            _phiTile.Button.Click += (_, _) => PhiRequested?.Invoke(this, EventArgs.Empty);
+            _phiTile.Button.Click += (_, _) =>
+            {
+                if (_view is { } v)
+                    LinkRequested?.Invoke(this, v.PhiLink);
+            };
             _phiTile.Subtitle.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"];
             // Reports only (TRAY.md T8): looks like a tile, takes no input.
             _windowTile = MakeTile(new ToggleButton { IsHitTestVisible = false, IsTabStop = false });
@@ -360,7 +391,7 @@ public sealed partial class FlyoutWindow : Window
     {
         InputBlock.Visibility = Show(input.Visible);
         InputValue.Text = input.Value;
-        InputChevron.Glyph = input.Expanded ? "" : "";
+        InputChevron.Glyph = input.Expanded ? "\uE70E" : "\uE70D";
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(InputButton, input.AccessibleName);
         InputList.Visibility = Show(input.Expanded);
         InputEmpty.Text = input.EmptyText ?? "";
@@ -377,7 +408,8 @@ public sealed partial class FlyoutWindow : Window
                 var radio = new RadioButton { Content = item.Label, IsChecked = item.Checked, GroupName = "wdi-input" };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(radio, item.Label);
                 var source = item.Source;
-                radio.Click += (_, _) => MicChosen?.Invoke(this, source);
+                // Checked, not Click: a screen reader's select (UIA SelectionItem) checks without clicking.
+                radio.Checked += (_, _) => MicChosen?.Invoke(this, source);
                 InputList.Children.Add(radio);
             }
         }
@@ -394,6 +426,161 @@ public sealed partial class FlyoutWindow : Window
             IntervalSlider.Value = interval.Index;
             _syncingSlider = false;
         }
+    }
+
+    private IReadOnlyList<TicketItem> _shownTickets = [];
+    private IReadOnlyList<TodayBar> _shownBars = [];
+    private string? _iconFor;
+
+    private void RenderNow(NowBlock now)
+    {
+        NowCard.Visibility = Show(now.Visible);
+        NowCard.Opacity = now.Dimmed ? 0.6 : 1;
+        if (!now.Visible)
+            return;
+
+        NowFocusButton.Visibility = Show(now.Focus is not null);
+        if (now.Focus is { } focus)
+        {
+            NowAppName.Text = focus.AppName;
+            NowTitle.Text = focus.Title;
+            NowInitials.Text = focus.Initials;
+            NowFocusButton.IsEnabled = focus.Sensitive;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(NowFocusButton, focus.AccessibleName);
+            ToolTipService.SetToolTip(NowFocusButton, focus.Title.Length > 0 ? focus.Title : null);
+            _ = ShowAppIcon(focus.AppId);
+        }
+
+        NowStretchBlock.Visibility = Show(now.Stretch is not null);
+        if (now.Stretch is { } stretch)
+        {
+            NowStretchText.Text = stretch.Text;
+            TicketLabel.Text = stretch.TicketLabel;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(TicketButton, stretch.TicketAccessibleName);
+            TicketChevron.Glyph = stretch.TicketExpanded ? "\uE70E" : "\uE70D";
+            TicketButton.IsEnabled = stretch.TicketSensitive;
+            AssignButton.IsEnabled = stretch.AssignSensitive;
+            AssignButton.Content = stretch.AssignBusy ? "Assigning…" : "Assign";
+            AssignButton.Tag = stretch.Assign;
+            TicketList.Visibility = Show(stretch.TicketExpanded);
+            if (!stretch.Tickets.SequenceEqual(_shownTickets))
+            {
+                _shownTickets = stretch.Tickets;
+                TicketList.Children.Clear();
+                foreach (var item in stretch.Tickets)
+                {
+                    var radio = new RadioButton { Content = item.Label, IsChecked = item.Checked, GroupName = "wdi-ticket" };
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(radio, item.AccessibleName);
+                    var ticket = item.Ticket;
+                    radio.Checked += (_, _) =>
+                    {
+                        TicketPicked?.Invoke(this, ticket);
+                        // The list closes under the focused radio: hand focus to the next step, Assign.
+                        AssignButton.Focus(FocusState.Keyboard);
+                    };
+                    TicketList.Children.Add(radio);
+                }
+            }
+        }
+
+        NowLast.Text = now.Last ?? "";
+        NowLast.Visibility = Show(now.Last is not null);
+        NowError.Text = now.Error ?? "";
+        NowError.Visibility = Show(now.Error is not null);
+    }
+
+    // The app's real icon when a running process has that executable name, else its initials.
+    private async Task ShowAppIcon(string appId)
+    {
+        if (appId == _iconFor)
+            return;
+        _iconFor = appId;
+        var icon = AppIcon is null || appId.Length == 0 ? null : await AppIcon(appId);
+        if (_iconFor != appId)
+            return;
+        NowIcon.Source = icon;
+        NowIcon.Visibility = Show(icon is not null);
+        NowInitialsTile.Visibility = Show(icon is null);
+    }
+
+    private void RenderToday(TodayBlock today)
+    {
+        TodayBlock.Visibility = Show(today.Visible);
+        TodayLabel.Text = today.Label;
+        // Rebuilt only when the bars change, so hover and focus survive a poll.
+        if (today.Bars.SequenceEqual(_shownBars))
+            return;
+        var focused = _shownBars.Count > 0 && TodayBars.Children.Any(c => c is Control { FocusState: not FocusState.Unfocused });
+        var focusIndex = TodayBars.Children.Select((c, i) => (c, i)).FirstOrDefault(x => x.c is Control { FocusState: not FocusState.Unfocused }).i;
+        _shownBars = today.Bars;
+        TodayBars.Children.Clear();
+        TodayBars.ColumnDefinitions.Clear();
+        var accent = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
+        foreach (var bar in today.Bars)
+        {
+            TodayBars.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Height = Math.Max(3, bar.Height * TodayBars.Height),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                RadiusX = 2,
+                RadiusY = 2,
+                Fill = bar.Color is { } hex ? new Microsoft.UI.Xaml.Media.SolidColorBrush(ParseColor(hex)) : accent,
+            };
+            var button = new Button
+            {
+                Content = rect,
+                Padding = new Thickness(0),
+                MinWidth = 0,
+                BorderThickness = new Thickness(0),
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Bottom,
+                IsEnabled = bar.Sensitive,
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, bar.AccessibleName);
+            var index = bar.Index;
+            var link = bar.Link;
+            button.Click += (_, _) => LinkRequested?.Invoke(this, link);
+            button.PointerEntered += (_, _) => HoverBarChanged?.Invoke(this, index);
+            button.PointerExited += (_, _) => HoverBarChanged?.Invoke(this, null);
+            button.GotFocus += (_, _) => HoverBarChanged?.Invoke(this, index);
+            button.LostFocus += (_, _) => HoverBarChanged?.Invoke(this, null);
+            Grid.SetColumn(button, bar.Index);
+            TodayBars.Children.Add(button);
+        }
+        // A bar that had focus hands it to the bar at the same index, or the last (POPOVER.md Amendment 2.5).
+        if (focused && TodayBars.Children.Count > 0)
+            ((Control)TodayBars.Children[Math.Min(focusIndex, TodayBars.Children.Count - 1)]).Focus(FocusState.Keyboard);
+    }
+
+    private static Windows.UI.Color ParseColor(string hex)
+    {
+        var v = Convert.ToUInt32(hex.TrimStart('#'), 16);
+        return Windows.UI.Color.FromArgb(0xFF, (byte)(v >> 16), (byte)(v >> 8), (byte)v);
+    }
+
+    private void NowFocusButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_view?.Now.Focus is { } focus)
+            LinkRequested?.Invoke(this, focus.Link);
+    }
+
+    private void TicketButton_Click(object sender, RoutedEventArgs e) =>
+        ExpandRequested?.Invoke(this, _view?.Now.Stretch?.TicketExpanded == true ? null : "ticket");
+
+    private void AssignButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AssignButton.Tag is AssignmentBody body)
+            AssignRequested?.Invoke(this, body);
+    }
+
+    private void OpenButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_view is { } v)
+            LinkRequested?.Invoke(this, v.Open.Link);
     }
 
     private void InputButton_Click(object sender, RoutedEventArgs e) =>

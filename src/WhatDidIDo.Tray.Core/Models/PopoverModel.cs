@@ -1,4 +1,5 @@
 using System.Globalization;
+using WhatDidIDo.Tray.Core.App;
 using WhatDidIDo.Tray.Core.Control;
 
 namespace WhatDidIDo.Tray.Core.Models;
@@ -86,19 +87,73 @@ public sealed record IntervalBlock(
 /// <summary>A committed stop kept on the slider until a status reports it or <see cref="Until"/> passes.</summary>
 public sealed record IntervalHold(int Index, int Seconds, long Until);
 
+/// <summary>A place in the app: <c>&lt;app&gt;/app/#/&lt;View&gt;?&lt;Params&gt;</c> (AppClient.Url).</summary>
+public sealed record AppLink(string View, IReadOnlyList<KeyValuePair<string, string>> Params)
+{
+    public static AppLink Of(string view, params (string Key, string Value)[] parameters) =>
+        new(view, parameters.Select(p => KeyValuePair.Create(p.Key, p.Value)).ToList());
+
+    public bool Equals(AppLink? other) => other is not null && View == other.View && Params.SequenceEqual(other.Params);
+
+    public override int GetHashCode() => View.GetHashCode(StringComparison.Ordinal);
+}
+
+/// <summary>The Now card's focused window; <see cref="AppId"/> may be an executable path (its icon).</summary>
+public sealed record NowFocus(string AppId, string AppName, string Title, string Initials, string AccessibleName, bool Sensitive, AppLink Link);
+
+public sealed record TicketItem(int Index, string Ticket, string Label, string AccessibleName, bool Checked);
+
+/// <summary>The unassigned stretch up to now: its text, the ticket picker and Assign.</summary>
+/// <param name="Assign">The body to post, or null until a ticket is picked.</param>
+public sealed record NowStretch(
+    string Start,
+    string End,
+    string Text,
+    string TicketLabel,
+    string TicketAccessibleName,
+    bool TicketExpanded,
+    bool TicketSensitive,
+    IReadOnlyList<TicketItem> Tickets,
+    bool AssignBusy,
+    bool AssignSensitive,
+    AssignmentBody? Assign);
+
+public sealed record NowBlock(bool Visible, bool Dimmed, NowFocus? Focus, NowStretch? Stretch, string? Last, string? Error);
+
+/// <summary>A Today bar. <see cref="Color"/>: "#rrggbb", or null for the system accent (active and unassigned).</summary>
+public sealed record TodayBar(int Index, string Kind, string? Color, double Height, string Label, string AccessibleName, bool Sensitive, AppLink Link);
+
+/// <summary>The Today bars; <see cref="Label"/> is the hovered bar's, else the range.</summary>
+public sealed record TodayBlock(bool Visible, string Range, string Label, IReadOnlyList<TodayBar> Bars);
+
+public sealed record OpenBlock(bool Sensitive, AppLink Link);
+
 /// <summary>Widget state the flyout owns and passes back in (POPOVER.md 6, <c>ui</c>).</summary>
-/// <param name="Expanded">"input" while the input picker is open, else null.</param>
+/// <param name="Expanded">"input" or "ticket" while that inline list is open, else null.</param>
 /// <param name="DragIndex">The stop being dragged or committed, else null.</param>
 /// <param name="Hold">After a commit, else null (<see cref="PopoverModel.HeldIndex"/>).</param>
+/// <param name="Ticket">The ticket picked for Assign ("" none).</param>
+/// <param name="AssignError">AssignErrorText of the last failed Assign, until the flyout closes.</param>
+/// <param name="HoverBar">The hovered or focused Today bar, else null.</param>
 public sealed record PopoverUi(
     bool CommandBusy = false,
     bool StopConfirm = false,
     string? Expanded = null,
     int? DragIndex = null,
     IntervalHold? Hold = null,
-    bool IntervalBusy = false);
+    bool IntervalBusy = false,
+    string Ticket = "",
+    bool AssignBusy = false,
+    string? AssignError = null,
+    int? HoverBar = null);
 
-/// <summary>Everything the flyout renders (slices <c>tray-core</c> and <c>tray-popover</c>).</summary>
+/// <summary>What the flyout knows about the app server (slice <c>tray-app</c>).</summary>
+/// <param name="HasBase">An app server origin is known.</param>
+/// <param name="Day">The day, or null (none, 404, not loaded).</param>
+/// <param name="InvalidSetting">The appUrl setting is set but not a local address.</param>
+public sealed record AppState(bool HasBase = false, TimesheetDay? Day = null, bool InvalidSetting = false);
+
+/// <summary>Everything the flyout renders.</summary>
 public sealed record PopoverView(
     bool Running,
     string? State,
@@ -107,6 +162,10 @@ public sealed record PopoverView(
     Tiles Tiles,
     InputBlock Input,
     IntervalBlock Interval,
+    NowBlock Now,
+    TodayBlock Today,
+    OpenBlock Open,
+    AppLink PhiLink,
     Footer Footer);
 
 /// <summary>
@@ -247,7 +306,7 @@ public static class PopoverModel
             subtitle = "Off · no audio";
         var on = mic is { Available: true, On: true };
         var sensitive = mic is { Available: true } && status!.State is { } state && MicStates.Contains(state);
-        return new Tile(true, "Microphone", subtitle, on ? "" : "", on, on, sensitive, Interactive: true, "Microphone");
+        return new Tile(true, "Microphone", subtitle, on ? "\uE720" : "\uEC54", on, on, sensitive, Interactive: true, "Microphone");
     }
 
     /// <param name="hasAppServer">The tile opens the app's Timeline, so it needs the app server (slice tray-app).</param>
@@ -258,7 +317,7 @@ public static class PopoverModel
         var subtitle = visible
             ? $"{n!.Value.ToString("0.##", CultureInfo.InvariantCulture)} frame{(n == 1 ? "" : "s")} withheld"
             : "";
-        return new Tile(visible, "PHI guard", subtitle, "", On: false, Accent: false, visible && hasAppServer,
+        return new Tile(visible, "PHI guard", subtitle, "\uEA18", On: false, Accent: false, visible && hasAppServer,
             Interactive: true, "PHI guard: review withheld frames in Timeline", visible ? n : null);
     }
 
@@ -270,7 +329,7 @@ public static class PopoverModel
     {
         var on = running && status?.WindowActivityAvailable == true;
         var subtitle = on ? "Recording window titles" : running ? "Not enabled on the server" : "Off";
-        return new Tile(true, "Active window", subtitle, "", on, on, on, Interactive: false, $"Active window: {subtitle}");
+        return new Tile(true, "Active window", subtitle, "\uE737", on, on, on, Interactive: false, $"Active window: {subtitle}");
     }
 
     public static InputBlock Input(SessionStatus? status, bool running, MicView? micView, IReadOnlyList<MicItem>? mics,
@@ -312,6 +371,123 @@ public static class PopoverModel
             running && status?.State is { } state && LiveStates.Contains(state) && !busy);
     }
 
+    public const string AppUrlNotice = "App server URL in Settings is not a local address";
+
+    // The app's win skin --warn and --faint, light and dark (tokens.css), for
+    // the Today bars that are not ticket-colored.
+    public static string WarnColor(bool dark) => dark ? "#fce100" : "#c27c0e";
+
+    public static string FaintColor(bool dark) => dark ? "#8b8b8b" : "#8a8a8a";
+
+    /// <summary>
+    /// Body for the Assign: the stretch, the ticket, and the day's
+    /// ticket_defaults for it ("", "", true when absent).
+    /// </summary>
+    public static AssignmentBody AssignmentFor(TimesheetDay day, DayRun stretch, string ticket)
+    {
+        ArgumentNullException.ThrowIfNull(day);
+        ArgumentNullException.ThrowIfNull(stretch);
+        var d = day.TicketDefaults.FirstOrDefault(t => t.Ticket == ticket);
+        return new AssignmentBody(stretch.Start, stretch.End, ticket, d?.Client ?? "", d?.Category ?? "", "", d?.Billable ?? true);
+    }
+
+    public static string AssignErrorText(Exception error) =>
+        error is AppException { Code: "conflict" } ? "The timesheet changed. Try again." : "Couldn't assign that time.";
+
+    /// <summary>How an entry is named: ticket, else category, else client (the app's groupLabel).</summary>
+    public static string EntryLabel(DayAssignment a)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        return a.Ticket.Length > 0 ? a.Ticket : a.Category.Length > 0 ? a.Category : a.Client.Length > 0 ? a.Client : "Unlabeled";
+    }
+
+    public static NowBlock Now(TimesheetDay? day, bool hasBase, bool recording, bool use24h, PopoverUi ui)
+    {
+        ArgumentNullException.ThrowIfNull(ui);
+        var hidden = new NowBlock(false, false, null, null, null, null);
+        if (day is null)
+            return hidden;
+        var seg = DayModel.LastFocus(day);
+        var stretch = DayModel.CurrentStretch(day);
+        var done = stretch is null ? DayModel.LastEntry(day) : null;
+        if (seg is null && stretch is null && done is null)
+            return hidden;
+
+        NowFocus? focus = seg?.Window is { } w
+            ? new NowFocus(w.AppId, w.AppName, w.Title, DayModel.AppInitials(w.AppName),
+                $"{w.AppName}: {w.Title}. Open the timesheet", hasBase, AppLink.Of("timesheet", ("date", day.Date)))
+            : null;
+
+        NowStretch? stretchView = null;
+        if (stretch is not null)
+        {
+            var picked = ui.Ticket;
+            var busy = ui.AssignBusy;
+            stretchView = new NowStretch(
+                stretch.Start,
+                stretch.End,
+                $"{DayModel.ClockTime(stretch.StartAt, day.Zone, use24h)} – now is unassigned",
+                picked.Length > 0 ? picked : "Choose ticket…",
+                picked.Length > 0 ? $"Ticket: {picked}" : "Choose ticket",
+                ui.Expanded == "ticket" && !busy,
+                !busy && day.Tickets.Count > 0,
+                day.Tickets.Select((t, i) =>
+                {
+                    var client = day.TicketDefaults.FirstOrDefault(d => d.Ticket == t)?.Client;
+                    return string.IsNullOrEmpty(client)
+                        ? new TicketItem(i, t, t, t, t == picked)
+                        : new TicketItem(i, t, $"{t} · {client}", $"{t}, {client}", t == picked);
+                }).ToList(),
+                busy,
+                picked.Length > 0 && !busy && hasBase,
+                picked.Length > 0 ? AssignmentFor(day, stretch, picked) : null);
+        }
+
+        return new NowBlock(
+            true,
+            !recording,
+            focus,
+            stretchView,
+            done is null ? null : $"{EntryLabel(done.Assignment)} until {DayModel.ClockTime(done.ClipEnd, day.Zone, use24h)}",
+            ui.AssignError);
+    }
+
+    public static TodayBlock Today(TimesheetDay? day, bool hasBase, bool use24h, bool dark, int? hoverBar)
+    {
+        var buckets = day is null ? [] : DayModel.SparkBuckets(day);
+        if (day is null || buckets.Count == 0 || day.Span is not { } span)
+            return new TodayBlock(false, "", "", []);
+        var bars = buckets.Select((b, i) =>
+        {
+            var kind = b.State == "paused" ? "paused" : b.State != "active" ? "faint" : b.Ticket is null ? "accent" : "ticket";
+            var clock = DayModel.ClockTime(b.Start, day.Zone, use24h);
+            var text = b.State != "active" ? b.State : b.Ticket is null ? "unassigned" : b.Ticket.Length > 0 ? b.Ticket : "internal";
+            return new TodayBar(
+                i,
+                kind,
+                kind switch
+                {
+                    "paused" => WarnColor(dark),
+                    "faint" => FaintColor(dark),
+                    "accent" => null,
+                    _ => DayModel.TicketColor(b.Ticket, dark),
+                },
+                kind switch
+                {
+                    "paused" => 0.22,
+                    "faint" => 0.14,
+                    _ => 0.3 + 0.7 * b.Active,
+                },
+                $"{clock} · {text}",
+                $"{clock}: {text}",
+                hasBase,
+                AppLink.Of("timeline", ("date", day.Date), ("t", DayModel.Hhmm(b.Start.AddMinutes(7.5), day.Zone))));
+        }).ToList();
+        var range = $"{DayModel.ClockTime(span.Start, day.Zone, use24h)} – now";
+        var hovered = hoverBar is { } h && h >= 0 && h < bars.Count ? bars[h] : null;
+        return new TodayBlock(true, range, hovered?.Label ?? range, bars);
+    }
+
     public static Footer FooterBlock(SessionStatus? status, bool running, PopoverUi ui)
     {
         if (!running || status is null)
@@ -332,8 +508,11 @@ public static class PopoverModel
     /// <param name="mic">MicController.View(), or null.</param>
     /// <param name="mics">MicController.Mics (null: unknown).</param>
     /// <param name="micChoiceLabel">The saved choice's label.</param>
-    /// <param name="hasAppServer">Whether an app server was found (slice tray-app).</param>
+    /// <param name="app">The app server: origin known, the day, an invalid setting.</param>
     /// <param name="nowMs">The clock <see cref="IntervalHold.Until"/> is on.</param>
+    /// <param name="localNow">This machine's clock, for the local date of links without a day.</param>
+    /// <param name="use24h">Windows' short time format is 24-hour.</param>
+    /// <param name="dark">The flyout's theme, for the bars' colors.</param>
     public static PopoverView View(
         SessionStatus? status,
         bool running = true,
@@ -344,9 +523,15 @@ public static class PopoverModel
         MicView? mic = null,
         IReadOnlyList<MicItem>? mics = null,
         string micChoiceLabel = "",
-        bool hasAppServer = false,
-        long nowMs = 0)
+        AppState? app = null,
+        long nowMs = 0,
+        DateTimeOffset? localNow = null,
+        bool use24h = false,
+        bool dark = false)
     {
+        app ??= new AppState();
+        var hasAppServer = app.HasBase;
+        var date = app.Day?.Date ?? DayModel.LocalDate(localNow ?? DateTimeOffset.Now);
         ui ??= new PopoverUi();
         running = running && status is not null;
         var notices = new List<string>();
@@ -356,6 +541,8 @@ public static class PopoverModel
             notices.Add(lastError);
         if (mic?.Hint is { } hint)
             notices.Add(hint);
+        if (app.InvalidSetting)
+            notices.Add(AppUrlNotice);
         return new PopoverView(
             running,
             running ? status!.State : null,
@@ -364,6 +551,10 @@ public static class PopoverModel
             new Tiles(running, MicTile(status, running, mics), PhiTile(status, running, hasAppServer), WindowTile(status, running)),
             Input(status, running, mic, mics, micChoiceLabel, ui.Expanded),
             Interval(status, running, ui.DragIndex, ui.Hold, nowMs, ui.IntervalBusy),
+            Now(app.Day, hasAppServer, running && status!.State == "recording", use24h, ui),
+            Today(app.Day, hasAppServer, use24h, dark, ui.HoverBar),
+            new OpenBlock(hasAppServer, AppLink.Of("today")),
+            AppLink.Of("timeline", ("date", date), ("phi", "1")),
             FooterBlock(status, running, ui));
     }
 }

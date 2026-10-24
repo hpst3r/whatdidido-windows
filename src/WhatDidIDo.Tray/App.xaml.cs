@@ -45,7 +45,11 @@ public partial class App : Application
         var path = ControlFile.DefaultPath();
         IControlFileSource source = path is null ? new MissingControlFile() : new OwnedControlFileSource(path);
         _controller = new TrayController(new ControlClient(source), new SettingsStore(SettingsStore.DefaultPath()), Quit);
+#if DEBUG
+        _controller.Start(Environment.GetCommandLineArgs().Contains("--show-flyout"));
+#else
         _controller.Start();
+#endif
     }
 
     private void Quit()

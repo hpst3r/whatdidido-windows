@@ -23,7 +23,7 @@ public class PopoverBlocksTests
         var on = PopoverModel.MicTile(Status(mic: Mic(true)), true, Mics);
         Assert.Equal("On · USB headset", on.Subtitle);
         Assert.True(on.On && on.Accent && on.Sensitive);
-        Assert.Equal("", on.Glyph);
+        Assert.Equal("\uE720", on.Glyph);
 
         Assert.Equal("On · USB headset (waiting for device)", PopoverModel.MicTile(Status(mic: Mic(true, "waiting_for_device")), true, Mics).Subtitle);
         Assert.Equal("On · input", PopoverModel.MicTile(Status(mic: Mic(true, label: null) with { SourceId = "99" }), true, Mics).Subtitle);
@@ -31,7 +31,7 @@ public class PopoverBlocksTests
         var off = PopoverModel.MicTile(Status(mic: Mic(false)), true, Mics);
         Assert.Equal("Off · no audio", off.Subtitle);
         Assert.False(off.On);
-        Assert.Equal("", off.Glyph);
+        Assert.Equal("\uEC54", off.Glyph);
 
         Assert.False(PopoverModel.MicTile(Status("starting", Mic(false)), true, Mics).Sensitive);
         Assert.True(PopoverModel.MicTile(Status("stopped", Mic(false)), true, Mics).Sensitive);

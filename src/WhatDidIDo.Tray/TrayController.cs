@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.UI.Dispatching;
+using WhatDidIDo.Tray.Core.App;
 using WhatDidIDo.Tray.Core.Control;
 using WhatDidIDo.Tray.Core.Models;
 using WhatDidIDo.Tray.Core.Settings;
@@ -28,6 +29,9 @@ internal sealed class TrayController : IDisposable
     private readonly FlyoutWindow _flyout = new();
     private readonly PauseReminder _pause = new();
     private readonly MicController _mic;
+    private readonly AppClient _app;
+    private readonly AppIcons _icons = new();
+    private readonly DispatcherQueueTimer _dayTimer;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly HashSet<string> _logged = [];
     private readonly CancellationTokenSource _cts = new();
@@ -42,6 +46,13 @@ internal sealed class TrayController : IDisposable
     private int? _dragIndex;
     private IntervalHold? _hold;
     private bool _intervalBusy;
+    private string? _appBase;
+    private TimesheetDay? _day;
+    private int _dayRequest;      // numbers day requests; only the latest one's answer is used
+    private string _ticket = "";
+    private bool _assignBusy;
+    private string? _assignError;
+    private int? _hoverBar;
     private bool _polling;
     private bool _pollAgain;
     private TrayView? _shownTray;
@@ -72,6 +83,12 @@ internal sealed class TrayController : IDisposable
             ct => _client.StatusAsync(ct),
             openSources: () => _expanded = "input",
             changed: Render);
+        _app = new AppClient(client, () => _settings.Current.AppUrl);
+        // The day is read while the flyout is open: on open, every 15 s, and after an Assign (POPOVER.md 3.4).
+        _dayTimer = _dispatcher.CreateTimer();
+        _dayTimer.IsRepeating = true;
+        _dayTimer.Interval = TimeSpan.FromSeconds(15);
+        _dayTimer.Tick += (_, _) => _ = LoadDay();
         _settings.Changed += (_, _) => Render();
 
         _tray.Activated += (_, _) => ToggleFlyout();
@@ -90,8 +107,21 @@ internal sealed class TrayController : IDisposable
             _expanded = list;
             Render();
         };
-        // The PHI tile opens the app's Timeline: the app server comes with slice tray-app.
-        _flyout.PhiRequested += (_, _) => { };
+        _flyout.LinkRequested += (_, link) => OpenLink(link);
+        _flyout.TicketPicked += (_, ticket) =>
+        {
+            _ticket = ticket;
+            _expanded = null;
+            Render();
+        };
+        _flyout.AssignRequested += (_, body) => _ = Assign(body);
+        _flyout.HoverBarChanged += (_, index) =>
+        {
+            _hoverBar = index;
+            Render();
+        };
+        _flyout.ThemeChanged += (_, _) => Render();
+        _flyout.AppIcon = _icons.GetAsync;
         _flyout.IntervalChanging += (_, index) =>
         {
             _dragIndex = index;
@@ -104,22 +134,31 @@ internal sealed class TrayController : IDisposable
             {
                 PollNow();
                 _ = LoadMics();
+                _ = LoadDay();
+                _dayTimer.Start();
             }
             else
             {
                 _mic.FlyoutClosed();
+                _dayTimer.Stop();
+                _dayRequest++;          // an answer still on its way is dropped
                 _expanded = null;
                 _notice = null;
+                _assignError = null;    // POPOVER.md Amendment 2.6
+                _hoverBar = null;
                 SetStopConfirm(false);
                 Schedule();
             }
         };
     }
 
-    public void Start()
+    /// <param name="showFlyout">Open the flyout at once (debug builds' <c>--show-flyout</c>, for checks without a tray click).</param>
+    public void Start(bool showFlyout = false)
     {
         Render();
         PollNow();
+        if (showFlyout)
+            _flyout.ShowAt(_tray.Bounds());
     }
 
     public void Dispose()
@@ -128,7 +167,9 @@ internal sealed class TrayController : IDisposable
         _pollTimer.Stop();
         _stopConfirmTimer.Stop();
         _holdTimer.Stop();
+        _dayTimer.Stop();
         _tray.Dispose();
+        _app.Dispose();
         _flyout.Destroy();
         _mic.Dispose();
         _client.Dispose();
@@ -270,6 +311,98 @@ internal sealed class TrayController : IDisposable
         Render();
     }
 
+    /// <summary>
+    /// Reads today's timesheet from the app server. No app server, or one
+    /// without <c>--timesheet</c> (404): no Now card or Today bars, no notice.
+    /// Nothing listening: the same, and discovery runs again next time. Other
+    /// failures: the same, logged once. An answer that arrives after the
+    /// flyout closed or after a newer request started is dropped.
+    /// </summary>
+    private async Task LoadDay()
+    {
+        if (!_flyout.IsOpen)
+            return;
+        var request = ++_dayRequest;
+        string? origin;
+        TimesheetDay? day;
+        try
+        {
+            origin = await _app.BaseAsync(_cts.Token);
+            day = origin is null ? null : await _app.DayAsync(DayModel.LocalDate(DateTimeOffset.Now), _cts.Token);
+        }
+        catch (AppException e)
+        {
+            if (request != _dayRequest)
+                return;
+            if (!e.Unreachable)
+                LogOnce($"day: {e.Message}");
+            origin = e.Unreachable ? null : _appBase;
+            day = null;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (request != _dayRequest || !_flyout.IsOpen)
+            return;
+        _appBase = origin;
+        _day = day;
+        // A picked ticket that the day no longer suggests is forgotten.
+        if (_ticket.Length > 0 && day is not null && !day.Tickets.Contains(_ticket))
+            _ticket = "";
+        Render();
+    }
+
+    /// <summary>Saves the unassigned stretch for the picked ticket; at most one in flight.</summary>
+    private async Task Assign(AssignmentBody body)
+    {
+        if (_assignBusy)
+            return;
+        _assignBusy = true;
+        _assignError = null;
+        Render();
+        try
+        {
+            await _app.AssignAsync(body, _cts.Token);
+            _ticket = "";
+        }
+        catch (AppException e)
+        {
+            // Closing the flyout clears the error; one that arrives after it closed is only logged.
+            if (_flyout.IsOpen)
+                _assignError = PopoverModel.AssignErrorText(e);
+            LogOnce($"assign: {e.Message}");
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            _assignBusy = false;
+        }
+        Render();
+        await LoadDay();
+    }
+
+    /// <summary>Opens a place in the app in the default browser and closes the flyout.</summary>
+    private void OpenLink(AppLink link)
+    {
+        if (_app.Url(link.View, link.Params) is not { } url)
+            return;
+        _flyout.Hide();
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            _notice = e.Message;
+            LogOnce($"link: {e.GetType().Name}");
+            Render();
+        }
+    }
+
     /// <summary>The input picker's sources: read when the flyout opens and after every mic action.</summary>
     private async Task LoadMics()
     {
@@ -370,12 +503,16 @@ internal sealed class TrayController : IDisposable
             _pollError,
             _notice,
             _pause.PausedFor(Now),
-            new PopoverUi(_commandBusy, _stopConfirm, _expanded, _dragIndex, _hold, _intervalBusy),
+            new PopoverUi(_commandBusy, _stopConfirm, _expanded, _dragIndex, _hold, _intervalBusy,
+                _ticket, _assignBusy, _assignError, _hoverBar),
             _mic.View(),
             _mic.Mics,
             _mic.Preferred.Label,
-            hasAppServer: false,
-            Now));
+            new AppState(_appBase is not null, _day, _app.InvalidSetting),
+            Now,
+            DateTimeOffset.Now,
+            DayModel.Uses24Hour(System.Globalization.CultureInfo.CurrentCulture),
+            _flyout.IsDark));
     }
 
     // Errors are logged once per distinct message, never with the token (TRAY.md 2.6).

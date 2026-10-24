@@ -6,7 +6,7 @@ counterpart of [whatdidido-gnome](https://github.com/hpst3r/whatdidido-gnome).
 It talks to the work session's local control API (`/control/v1/*`), found
 through `%LOCALAPPDATA%\whatdidido\control.json`.
 
-Status: pre-alpha, slices `tray-core` and `tray-popover` of [docs/TRAY.md](docs/TRAY.md).
+Status: pre-alpha, slices `tray-core`, `tray-popover` and `tray-app` of [docs/TRAY.md](docs/TRAY.md).
 
 - **Tray icon:** a glyph per state (recording in red, paused in amber,
   stopped, starting/stopping, reconnecting, failed, not running), in the
@@ -18,8 +18,12 @@ Status: pre-alpha, slices `tray-core` and `tray-popover` of [docs/TRAY.md](docs/
   confirmation. Tiles for the **Microphone** (on/off, the microphone in use
   and its trouble), the **PHI guard** count and **Active window** (whether
   the session records windows); the **Input** picker; a **Screenshot
-  interval** slider over the app's stops, 5 s to 1 h. Acrylic, rounded, in
-  your accent color, light or dark; Escape or a click elsewhere closes it.
+  interval** slider over the app's stops, 5 s to 1 h; from the app server,
+  the **Now** card (the focused app and window, and while the time since the
+  last entry is unassigned, a ticket picker and **Assign**; else the last
+  entry), the **Today** bars (one per 15 minutes, colored by ticket; click
+  one to open the Timeline there) and **Open whatdidido**. Acrylic, rounded,
+  in your accent color, light or dark; Escape or a click elsewhere closes it.
 - **Menu** (right click): the primary action, Open session page, Quit.
 
 Polling: every 2 s while the flyout is open or the session is busy, else
@@ -39,9 +43,23 @@ Settings live in `%LOCALAPPDATA%\whatdidido-windows\settings.json` (the
 extension's keys in camelCase; TRAY.md section 6). There is no settings
 window yet.
 
-Still to come (TRAY.md section 7): the Now card and Today bars from the app
-server (and with it the PHI tile's link), the pause and microphone reminders,
-a settings window and start at login.
+## App server
+
+The Now card, the Today bars and the links come from the whatdidido read
+server that serves `/app/` (with `--timesheet`), as in whatdidido-gnome. The
+tray finds it from the work session's `/day` redirect (a session started with
+`--app-url`), without the control token; `appUrl` in the settings file can
+name it instead (`http://127.0.0.1:<port>`, nothing else). The day is read
+when the flyout opens and every 15 s while it stays open, never while it is
+closed. Requests to it carry no token, cookie, `Origin` or `Sec-Fetch-*`
+header and follow no redirects; the server treats them as the local user.
+
+On a Windows read server, start it with `TZ` set to your IANA zone (for
+example `America/Los_Angeles`): without `/etc/localtime` it otherwise uses
+UTC days (TRAY.md open point c).
+
+Still to come (TRAY.md section 7): the pause and microphone reminders, a
+settings window and start at login.
 
 ## Build and run
 
@@ -57,14 +75,18 @@ src\WhatDidIDo.Tray\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\whatdidido
 Windows 11 puts a new tray icon in the overflow (`^`); drag it onto the
 taskbar to keep it visible. One instance runs per login.
 
+Debug builds take `--show-flyout`, which opens the flyout at start-up, so it
+can be checked (for example with UI Automation) without a tray click.
+
 ## Layout
 
 - `src/WhatDidIDo.Tray.Core` (`net10.0`, no WinUI or Win32): every decision.
   `Control/` reads the control file and talks to `/control/v1`;
   `Models/` ports the extension's pure modules (`StatusModel` = `model.js`,
   `PopoverModel` = `popover_model.js`, `MicModel`/`MicController` =
-  `mic_model.js`, `PauseReminder` = `pause_reminder.js`) with the same
-  strings and rules; `Settings/` reads and writes the settings file.
+  `mic_model.js`, `DayModel` = `day_model.js`, `PauseReminder` =
+  `pause_reminder.js`) with the same strings and rules; `App/` finds and
+  talks to the app server; `Settings/` reads and writes the settings file.
 - `src/WhatDidIDo.Tray` (WinUI 3): `TrayController` polls and renders;
   `FlyoutWindow` draws a `PopoverView`; `Native/` holds the
   `Shell_NotifyIcon` icon, its glyph rendering and the control file's owner

@@ -109,6 +109,73 @@
                 </StackPanel>
             </Border>
 
+            <!-- Now (from the app server) -->
+            <Border x:Name="NowCard" CornerRadius="8" Padding="12,8" BorderThickness="1"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="NOW" Style="{StaticResource CaptionTextBlockStyle}" CharacterSpacing="80"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Button x:Name="NowFocusButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            Background="Transparent" BorderThickness="0" Padding="4" Margin="-4,0" Click="NowFocusButton_Click">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid Width="28" Height="28">
+                                <Border x:Name="NowInitialsTile" CornerRadius="6" Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                    <TextBlock x:Name="NowInitials" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"
+                                               FontWeight="SemiBold" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                                </Border>
+                                <Image x:Name="NowIcon" Width="24" Height="24" Visibility="Collapsed" />
+                            </Grid>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock x:Name="NowAppName" Style="{StaticResource BodyStrongTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="NowTitle" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                    <StackPanel x:Name="NowStretchBlock" Spacing="6">
+                        <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        <TextBlock x:Name="NowStretchText" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="TicketButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Click="TicketButton_Click">
+                                <Grid>
+                                    <TextBlock x:Name="TicketLabel" TextTrimming="CharacterEllipsis" Margin="0,0,20,0" />
+                                    <FontIcon x:Name="TicketChevron" Glyph="&#xE70D;" FontSize="12" HorizontalAlignment="Right" />
+                                </Grid>
+                            </Button>
+                            <Button x:Name="AssignButton" Grid.Column="1" Content="Assign" Style="{StaticResource AccentButtonStyle}"
+                                    Click="AssignButton_Click" />
+                        </Grid>
+                        <StackPanel x:Name="TicketList" Padding="4,0" Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBlock x:Name="NowLast" Style="{StaticResource CaptionTextBlockStyle}" Visibility="Collapsed" />
+                    <TextBlock x:Name="NowError" Style="{StaticResource CaptionTextBlockStyle}" Visibility="Collapsed"
+                               Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Today bars (from the app server) -->
+            <StackPanel x:Name="TodayBlock" Spacing="4" Padding="4,0">
+                <Grid>
+                    <TextBlock Text="Today" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock x:Name="TodayLabel" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+                <Grid x:Name="TodayBars" Height="36" ColumnSpacing="2" />
+            </StackPanel>
+
+            <!-- Open whatdidido -->
+            <Button x:Name="OpenButton" Content="Open whatdidido" Style="{StaticResource AccentButtonStyle}"
+                    HorizontalAlignment="Stretch" CornerRadius="16" Click="OpenButton_Click" />
+
             <!-- Footer -->
             <Border BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="-12,4,-12,0" Padding="16,6,8,6"
                     x:Name="FooterBar">

@@ -20,16 +20,16 @@ internal static class TrayIconRenderer
 
     private static char Glyph(TrayIconKind kind) => kind switch
     {
-        TrayIconKind.Recording => '',  // Record
-        TrayIconKind.Paused => '',     // Pause
-        TrayIconKind.Stopped => '',    // Stop
-        TrayIconKind.Busy => '',       // ProgressRingDots
-        TrayIconKind.Recovering => '', // Refresh
-        TrayIconKind.Failed => '',     // Error
-        _ => '',                       // PowerButton: not running
+        TrayIconKind.Recording => '\uE7C8',  // Record
+        TrayIconKind.Paused => '\uE769',     // Pause
+        TrayIconKind.Stopped => '\uE71A',    // Stop
+        TrayIconKind.Busy => '\uF16A',       // ProgressRingDots
+        TrayIconKind.Recovering => '\uE72C', // Refresh
+        TrayIconKind.Failed => '\uE783',     // Error
+        _ => '\uE7E8',                       // PowerButton: not running
     };
 
-    private const char Microphone = '';
+    private const char Microphone = '\uE720';
 
     /// <summary>The taskbar is light (Settings → Personalization → Colors → "Choose your mode": Windows).</summary>
     public static bool TaskbarIsLight()

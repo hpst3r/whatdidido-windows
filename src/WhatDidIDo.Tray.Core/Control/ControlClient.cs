@@ -103,7 +103,7 @@ public sealed class ControlClient : IDisposable
         return RequestAsync(HttpMethod.Post, "/control/v1/interval", new Dictionary<string, object> { ["seconds"] = seconds }, ct);
     }
 
-    private async Task<JsonElement> RequestAsync(HttpMethod method, string path, object? body, CancellationToken ct)
+    private async Task<JsonElement> RequestAsync(HttpMethod method, string path, IEnumerable<KeyValuePair<string, object>>? body, CancellationToken ct)
     {
         var endpoint = await EndpointAsync(ct).ConfigureAwait(false);
         try
@@ -120,13 +120,13 @@ public sealed class ControlClient : IDisposable
         }
     }
 
-    private async Task<JsonElement> SendAsync(ControlEndpoint endpoint, HttpMethod method, string path, object? body, CancellationToken ct)
+    private async Task<JsonElement> SendAsync(ControlEndpoint endpoint, HttpMethod method, string path, IEnumerable<KeyValuePair<string, object>>? body, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(method, new Uri(endpoint.BaseUrl + path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.Token);
         if (body is not null)
         {
-            request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8);
+            request.Content = new StringContent(JsonBody.Write(body), Encoding.UTF8);
             // Exactly "application/json": the API compares the media type, and a charset parameter is noise.
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         }
