@@ -63,6 +63,52 @@
             <!-- Notices -->
             <StackPanel x:Name="Notices" Spacing="8" />
 
+            <!-- Tiles (Quick Settings style), two per row; filled in code -->
+            <Grid x:Name="TilesGrid" ColumnSpacing="8" RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+            </Grid>
+
+            <!-- Input picker -->
+            <StackPanel x:Name="InputBlock" Spacing="4">
+                <Button x:Name="InputButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        Padding="12,8" CornerRadius="8" Click="InputButton_Click">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Input" />
+                        <TextBlock x:Name="InputValue" Grid.Column="1" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <FontIcon x:Name="InputChevron" Grid.Column="2" Glyph="&#xE70D;" FontSize="12" />
+                    </Grid>
+                </Button>
+                <StackPanel x:Name="InputList" Padding="12,0,12,4" Visibility="Collapsed">
+                    <TextBlock x:Name="InputEmpty" Style="{StaticResource CaptionTextBlockStyle}" Margin="0,4"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Screenshot interval -->
+            <Border x:Name="IntervalBlock" CornerRadius="8" Padding="12,8,12,4" BorderThickness="1"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                <StackPanel>
+                    <Grid>
+                        <TextBlock Text="Screenshot interval" />
+                        <TextBlock x:Name="IntervalValue" HorizontalAlignment="Right"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Grid>
+                    <Slider x:Name="IntervalSlider" Minimum="0" Maximum="13" StepFrequency="1" SmallChange="1" LargeChange="1"
+                            TickFrequency="1" TickPlacement="Inline" IsThumbToolTipEnabled="False"
+                            AutomationProperties.Name="Screenshot interval" ValueChanged="IntervalSlider_ValueChanged" />
+                </StackPanel>
+            </Border>
+
             <!-- Footer -->
             <Border BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="-12,4,-12,0" Padding="16,6,8,6"
                     x:Name="FooterBar">

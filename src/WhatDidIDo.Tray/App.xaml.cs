@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using WhatDidIDo.Tray.Core.Control;
+using WhatDidIDo.Tray.Core.Settings;
 using WhatDidIDo.Tray.Native;
 
 namespace WhatDidIDo.Tray;
@@ -43,7 +44,7 @@ public partial class App : Application
 
         var path = ControlFile.DefaultPath();
         IControlFileSource source = path is null ? new MissingControlFile() : new OwnedControlFileSource(path);
-        _controller = new TrayController(new ControlClient(source), Quit);
+        _controller = new TrayController(new ControlClient(source), new SettingsStore(SettingsStore.DefaultPath()), Quit);
         _controller.Start();
     }
 

@@ -159,6 +159,70 @@ public sealed class ControlClientTests : IAsyncDisposable
         Assert.Equal("invalid JSON response", e.Message);
     }
 
+    private const string InventoryJson = """
+        {"inventory": "inv1", "microphones": [
+          {"id": "41", "label": "USB headset", "stable_id": "alsa_input.usb"},
+          {"id": "42", "label": "Laptop mic", "stable_id": null},
+          {"label": "no id"}]}
+        """;
+
+    [Fact]
+    public async Task Microphones_ParsesTheInventory()
+    {
+        _server.Handler = (_, _, _) => (200, InventoryJson);
+        var inv = await _client.MicrophonesAsync(Ct);
+        Assert.Equal("inv1", inv.Inventory);
+        Assert.Equal([new MicItem("41", "USB headset", "alsa_input.usb"), new MicItem("42", "Laptop mic", null)], inv.Microphones);
+    }
+
+    [Fact]
+    public async Task SetMicOn_ResolvesTheChoiceAgainstAFreshInventory()
+    {
+        _server.Handler = (m, p, _) => m == "GET" ? (200, InventoryJson) : (200, """{"mic": {}}""");
+        await _client.SetMicOnAsync(true, new Models.PreferredMic("alsa_input.usb", "1", "USB headset"), Ct);
+        Assert.Equal(["/control/v1/microphones", "/control/v1/mic"], _server.Requests.Select(r => r.Target));
+        Assert.Equal("""{"on":true,"source_id":"41","inventory":"inv1"}""", _server.Requests[1].Body);
+    }
+
+    [Fact]
+    public async Task SetMicOn_RetriesOnceWhenTheInventoryChanged()
+    {
+        var posts = 0;
+        _server.Handler = (m, _, _) => m == "GET" ? (200, InventoryJson)
+            : ++posts == 1 ? (409, """{"error": "inventory_changed"}""") : (200, "{}");
+        await _client.SetMicOnAsync(true, new Models.PreferredMic("alsa_input.usb"), Ct);
+        Assert.Equal(4, _server.Requests.Count);
+
+        posts = 0;
+        _server.Handler = (m, _, _) => m == "GET" ? (200, InventoryJson) : (409, """{"error": "inventory_changed"}""");
+        var e = await Assert.ThrowsAsync<ControlException>(() => _client.SetMicOnAsync(true, new Models.PreferredMic("alsa_input.usb"), Ct));
+        Assert.Equal("inventory_changed", e.Code);
+    }
+
+    [Fact]
+    public async Task SetMicOn_NeverSendsAnotherMicrophone()
+    {
+        _server.Handler = (_, _, _) => (200, InventoryJson);
+        var missing = await Assert.ThrowsAsync<ControlException>(() =>
+            _client.SetMicOnAsync(true, new Models.PreferredMic("alsa_input.gone", "", "Dock mic"), Ct));
+        Assert.Equal("microphone_missing", missing.Code);
+        Assert.Equal("Dock mic is not connected", missing.Message);
+        Assert.Equal(2, missing.Microphones!.Count);
+        Assert.All(_server.Requests, r => Assert.Equal("GET", r.Method));
+
+        var unset = await Assert.ThrowsAsync<ControlException>(() => _client.SetMicOnAsync(true, new Models.PreferredMic(), Ct));
+        Assert.Equal("microphone_unset", unset.Code);
+        Assert.Single(_server.Requests);
+    }
+
+    [Fact]
+    public async Task SetMicOff_SendsOnlyOff()
+    {
+        _server.Handler = (_, _, _) => (200, "{}");
+        await _client.SetMicOnAsync(false, new Models.PreferredMic(), Ct);
+        Assert.Equal("""{"on":false}""", Assert.Single(_server.Requests).Body);
+    }
+
     private sealed class CallbackControlFile(Func<string?> read) : IControlFileSource
     {
         public Task<string?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult(read());

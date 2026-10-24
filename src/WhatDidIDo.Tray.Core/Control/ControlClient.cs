@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using WhatDidIDo.Tray.Core.Models;
 
 namespace WhatDidIDo.Tray.Core.Control;
 
@@ -49,8 +50,41 @@ public sealed class ControlClient : IDisposable
     public async Task<SessionStatus> StatusAsync(CancellationToken ct = default) =>
         SessionStatus.Parse(await RequestAsync(HttpMethod.Get, "/control/v1/status", null, ct).ConfigureAwait(false));
 
-    public Task<JsonElement> MicrophonesAsync(CancellationToken ct = default) =>
-        RequestAsync(HttpMethod.Get, "/control/v1/microphones", null, ct);
+    public async Task<MicInventory> MicrophonesAsync(CancellationToken ct = default) =>
+        MicInventory.Parse(await RequestAsync(HttpMethod.Get, "/control/v1/microphones", null, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Turning on resolves the chosen microphone against a fresh inventory
+    /// (its serial may have changed since the flyout was built); if the
+    /// inventory changed in between, it is read again and the request retried
+    /// once. It never picks another microphone: no choice, or a choice not in
+    /// the inventory, throws and sends nothing.
+    /// </summary>
+    public async Task SetMicOnAsync(bool on, PreferredMic preferred, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(preferred);
+        if (!on)
+        {
+            await RequestAsync(HttpMethod.Post, "/control/v1/mic", MicModel.Request(false, null, preferred, "")!, ct).ConfigureAwait(false);
+            return;
+        }
+        if (!preferred.HasChoice)
+            throw new ControlException(MicModel.ChooseText, code: "microphone_unset");
+        for (var attempt = 0; ; attempt++)
+        {
+            var inventory = await MicrophonesAsync(ct).ConfigureAwait(false);
+            var body = MicModel.Request(true, inventory.Microphones, preferred, inventory.Inventory)
+                ?? throw new ControlException(MicModel.MissingText(preferred), code: "microphone_missing", microphones: inventory.Microphones);
+            try
+            {
+                await RequestAsync(HttpMethod.Post, "/control/v1/mic", body, ct).ConfigureAwait(false);
+                return;
+            }
+            catch (ControlException e) when (attempt == 0 && e.Code == "inventory_changed")
+            {
+            }
+        }
+    }
 
     /// <returns>The state after the command.</returns>
     public async Task<string?> CommandAsync(string action, CancellationToken ct = default)

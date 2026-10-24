@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using WhatDidIDo.Tray.Core.Control;
 using WhatDidIDo.Tray.Core.Models;
+using WhatDidIDo.Tray.Core.Settings;
 using WhatDidIDo.Tray.Native;
 
 namespace WhatDidIDo.Tray;
@@ -17,13 +18,16 @@ internal sealed class TrayController : IDisposable
     private static readonly TimeSpan StopConfirmFor = TimeSpan.FromSeconds(4);
 
     private readonly ControlClient _client;
+    private readonly SettingsStore _settings;
     private readonly Action _quit;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
     private readonly DispatcherQueueTimer _pollTimer;
     private readonly DispatcherQueueTimer _stopConfirmTimer;
+    private readonly DispatcherQueueTimer _holdTimer;
     private readonly TrayIcon _tray = new();
     private readonly FlyoutWindow _flyout = new();
     private readonly PauseReminder _pause = new();
+    private readonly MicController _mic;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly HashSet<string> _logged = [];
     private readonly CancellationTokenSource _cts = new();
@@ -34,15 +38,20 @@ internal sealed class TrayController : IDisposable
     private string? _notice;
     private bool _commandBusy;
     private bool _stopConfirm;
+    private string? _expanded;
+    private int? _dragIndex;
+    private IntervalHold? _hold;
+    private bool _intervalBusy;
     private bool _polling;
     private bool _pollAgain;
     private TrayView? _shownTray;
     private bool? _shownLight;
     private int _shownSize;
 
-    public TrayController(ControlClient client, Action quit)
+    public TrayController(ControlClient client, SettingsStore settings, Action quit)
     {
         _client = client;
+        _settings = settings;
         _quit = quit;
         _pollTimer = _dispatcher.CreateTimer();
         _pollTimer.IsRepeating = false;
@@ -51,6 +60,19 @@ internal sealed class TrayController : IDisposable
         _stopConfirmTimer.IsRepeating = false;
         _stopConfirmTimer.Interval = StopConfirmFor;
         _stopConfirmTimer.Tick += (_, _) => SetStopConfirm(false);
+        // One render after a hold's deadline drops it if no status came.
+        _holdTimer = _dispatcher.CreateTimer();
+        _holdTimer.IsRepeating = false;
+        _holdTimer.Interval = TimeSpan.FromMilliseconds(PopoverModel.IntervalHoldMs + 50);
+        _holdTimer.Tick += (_, _) => Render();
+
+        _mic = new MicController(
+            settings,
+            (on, preferred, ct) => _client.SetMicOnAsync(on, preferred, ct),
+            ct => _client.StatusAsync(ct),
+            openSources: () => _expanded = "input",
+            changed: Render);
+        _settings.Changed += (_, _) => Render();
 
         _tray.Activated += (_, _) => ToggleFlyout();
         _tray.ContextMenuRequested += (_, at) => ShowMenu(at);
@@ -61,12 +83,33 @@ internal sealed class TrayController : IDisposable
         };
         _flyout.CommandRequested += (_, command) => _ = RunCommand(command);
         _flyout.StopConfirmRequested += (_, on) => SetStopConfirm(on);
+        _flyout.MicToggleRequested += (_, on) => _ = Act(ct => _mic.ToggleAsync(on, ct), reloadMics: true);
+        _flyout.MicChosen += (_, source) => _ = Act(ct => _mic.ChooseAsync(source, ct), reloadMics: true);
+        _flyout.ExpandRequested += (_, list) =>
+        {
+            _expanded = list;
+            Render();
+        };
+        // The PHI tile opens the app's Timeline: the app server comes with slice tray-app.
+        _flyout.PhiRequested += (_, _) => { };
+        _flyout.IntervalChanging += (_, index) =>
+        {
+            _dragIndex = index;
+            Render();
+        };
+        _flyout.IntervalCommitted += (_, index) => _ = CommitInterval(index);
         _flyout.OpenChanged += (_, open) =>
         {
             if (open)
+            {
                 PollNow();
+                _ = LoadMics();
+            }
             else
             {
+                _mic.FlyoutClosed();
+                _expanded = null;
+                _notice = null;
                 SetStopConfirm(false);
                 Schedule();
             }
@@ -84,8 +127,10 @@ internal sealed class TrayController : IDisposable
         _cts.Cancel();
         _pollTimer.Stop();
         _stopConfirmTimer.Stop();
+        _holdTimer.Stop();
         _tray.Dispose();
         _flyout.Destroy();
+        _mic.Dispose();
         _client.Dispose();
         _cts.Dispose();
     }
@@ -155,33 +200,98 @@ internal sealed class TrayController : IDisposable
         Render();
     }
 
+    /// <summary>Runs a control request, then polls. A failure becomes the flyout's notice; returns success.</summary>
+    private async Task<bool> Act(Func<CancellationToken, Task> request, bool reloadMics = false)
+    {
+        var ok = false;
+        try
+        {
+            await request(_cts.Token);
+            _notice = null;
+            ok = true;
+        }
+        catch (ControlException e)
+        {
+            _notice = StatusModel.ErrorText(e);
+            LogOnce($"action: {e.Message}");
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        PollNow();
+        if (reloadMics)
+            await LoadMics();
+        return ok;
+    }
+
     private async Task RunCommand(string command)
     {
         if (_commandBusy)
             return;
         _commandBusy = true;
-        _notice = null;
         Render();
+        await Act(ct => _client.CommandAsync(command, ct));
+        _commandBusy = false;
+        if (command == "stop")
+            _stopConfirm = false;
+        Render();
+    }
+
+    /// <summary>
+    /// Sends the shown stop once; the dragged label stays until the request
+    /// settles. A saved stop is then held until a status reports it or
+    /// <see cref="PopoverModel.IntervalHoldMs"/> pass (POPOVER.md Amendment 2.3).
+    /// </summary>
+    private async Task CommitInterval(int index)
+    {
+        var steps = PopoverModel.IntervalSteps;
+        if (index < 0 || index >= steps.Count)
+            return;
+        _dragIndex = index;
+        var seconds = steps[index];
+        var view = PopoverModel.Interval(_status, _running, _dragIndex, _hold, Now, _intervalBusy);
+        var saved = false;
+        if (view.Sensitive && seconds != view.SessionSeconds)
+        {
+            _intervalBusy = true;
+            Render();
+            saved = await Act(ct => _client.SetIntervalAsync(seconds, ct));
+            _intervalBusy = false;
+        }
+        // A newer drag or key step owns the slider now.
+        if (_dragIndex != index)
+            return;
+        _dragIndex = null;
+        _holdTimer.Stop();
+        _hold = saved ? new IntervalHold(index, seconds, Now + PopoverModel.IntervalHoldMs) : null;
+        if (saved)
+            _holdTimer.Start();
+        Render();
+    }
+
+    /// <summary>The input picker's sources: read when the flyout opens and after every mic action.</summary>
+    private async Task LoadMics()
+    {
+        if (!_running || _status?.Mic is not { Available: true })
+        {
+            _mic.SetInventory(null);
+            return;
+        }
+        IReadOnlyList<MicItem>? mics;
         try
         {
-            await _client.CommandAsync(command, _cts.Token);
+            mics = (await _client.MicrophonesAsync(_cts.Token)).Microphones;
         }
-        catch (ControlException e)
+        catch (ControlException)
         {
-            _notice = StatusModel.ErrorText(e);
-            LogOnce($"command: {e.Message}");
+            mics = null;
         }
         catch (OperationCanceledException)
         {
             return;
         }
-        finally
-        {
-            _commandBusy = false;
-            if (command == "stop")
-                _stopConfirm = false;
-        }
-        PollNow();
+        _mic.SetInventory(mics);  // also migrates a legacy microphone id
     }
 
     /// <summary>Polls at once; a request while a poll runs polls again right after it.</summary>
@@ -223,6 +333,7 @@ internal sealed class TrayController : IDisposable
             _polling = false;
         }
         _pause.Observe(_running ? _status?.State : null, Now);
+        _mic.UpdateStatus(_status, _running);
         Render();
         if (_pollAgain)
         {
@@ -237,13 +348,15 @@ internal sealed class TrayController : IDisposable
     {
         if (_polling)
             return;
-        _pollTimer.Interval = TimeSpan.FromSeconds(StatusModel.PollPeriod(_running ? _status?.State : null, _flyout.IsOpen));
+        var s = _settings.Current;
+        _pollTimer.Interval = TimeSpan.FromSeconds(
+            StatusModel.PollPeriod(_running ? _status?.State : null, _flyout.IsOpen, s.PollActive, s.PollIdle));
         _pollTimer.Start();
     }
 
     private void Render()
     {
-        var tray = StatusModel.Tray(_status, _running);
+        var tray = StatusModel.Tray(_status, _running, _settings.Current.ShowMicIndicator);
         var light = TrayIconRenderer.TaskbarIsLight();
         var size = _tray.IconSize;
         if (tray != _shownTray || light != _shownLight || size != _shownSize)
@@ -257,7 +370,12 @@ internal sealed class TrayController : IDisposable
             _pollError,
             _notice,
             _pause.PausedFor(Now),
-            new PopoverUi(_commandBusy, _stopConfirm)));
+            new PopoverUi(_commandBusy, _stopConfirm, _expanded, _dragIndex, _hold, _intervalBusy),
+            _mic.View(),
+            _mic.Mics,
+            _mic.Preferred.Label,
+            hasAppServer: false,
+            Now));
     }
 
     // Errors are logged once per distinct message, never with the token (TRAY.md 2.6).

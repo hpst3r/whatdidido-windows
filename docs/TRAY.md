@@ -1,6 +1,6 @@
 # Windows tray control (contract)
 
-Status: draft 2026-10-23; slice `tray-core` written (section 7). Later
+Status: draft 2026-10-23; slices `tray-core` and `tray-popover` written (section 7). Later
 changes are numbered amendments at the end.
 
 Goal: the Windows counterpart of the GNOME top-bar extension
@@ -82,9 +82,9 @@ into `PopoverModel` with the same names. Windows rendering:
 | Header | the app icon, "whatdidido", a Settings `Button` (glyph `E713`) |
 | Status card | a `CardBackgroundFillColorDefault` card, 8 px radius; the primary action is a round 40 px `Button`, accent-styled when it resumes |
 | Notices | an `InfoBar` (Warning severity) per notice, not closable |
-| Tiles | Quick Settings tiles: `ToggleButton`s 2 per row, glyph over title and subtitle; on = accent fill |
-| Input | an `Expander`-like row with the active microphone; a `RadioButtons` list when open |
-| Screenshot interval | label and value, a `Slider` with the 14 stops as ticks; commits on release, or 600 ms after the last key or wheel step |
+| Tiles | Quick Settings tiles, 2 per row in the extension's order (Microphone, PHI guard, Active window), glyph beside title and one-line subtitle: Microphone a `ToggleButton` (accent fill when on), PHI guard a `Button` with an amber subtitle, Active window a `ToggleButton` that takes no input (T8). Insensitive tiles are dimmed. |
+| Input | a row button, "Input" and the active microphone (else the saved choice, else "Choose…") with a chevron; open, a `RadioButton` per source below it, the saved choice checked. Rebuilt only when the sources change, so polling keeps focus. |
+| Screenshot interval | label and value on a card, a `Slider` over the 14 stops with inline ticks; a pointer drag commits once on release, a click on the track at once, arrow keys 600 ms after the last step; closing the flyout commits a pending step (POPOVER.md Amendment 2.2); a saved stop is held for 3 s until a status reports it (Amendment 2.3) |
 | Now | the app's icon from its executable when the `app_id` is a path, else initials; ticket `ComboBox` and an accent Assign `Button` |
 | Today | a row of `Rectangle` bars, tooltips on hover and focus |
 | Open whatdidido | an accent `Button`, full width |
@@ -100,6 +100,14 @@ Polling as the extension: every 2 s while the flyout is open or the state is
 starting, recording, recovering or stopping, else every 10 s, and at once
 when the flyout opens. The day is read when the flyout opens, every 15 s
 while it is open, and after an Assign; never while it is closed.
+
+### 4.1 Windows differences in `tray-popover`
+
+- The flyout's notice (a failed action) clears when the flyout closes.
+- The PHI guard tile is shown with its count but stays insensitive until
+  `tray-app` finds the app server it links to.
+- The mic badge on the tray icon is busy at 16 px (100 % scale); a cleaner
+  composition is later polish.
 
 ## 5. Reminders
 
@@ -125,7 +133,7 @@ only when the user turns it on in Settings.
 | Slice | Content | Done when |
 | --- | --- | --- |
 | `tray-core` (written) | Solution, Core: control file, `ControlClient`, `StatusModel` (`model.js`), tests against a loopback fake. App: tray icon per state with tooltip, flyout with the status card, notices, footer and Stop confirmation. | the icon follows a live session through Start, Pause, Resume and Stop |
-| `tray-popover` | `PopoverModel` complete: tiles, input picker and `MicChoice` (`mic_model.js`, issue #1 rules), interval slider. | every scenario of the extension's `tests/shots` renders |
+| `tray-popover` (written) | `MicModel` and `MicController` (`mic_model.js`, issue #1 rules), `ControlClient.SetMicOnAsync` and the typed inventory, `PopoverModel` tiles, input picker and interval, `SettingsStore` (section 6). App: the tiles, the input picker, the slider. | done live against a stateful fake of `/control/v1` (Windows sessions have no audio yet): the issue #1 prompt, a pick that turns the mic on, a switch while live, off and on with the saved choice, a disconnected choice that sends nothing; slider by drag, click and keys |
 | `tray-app` | `AppClient` (POPOVER.md section 3 and Amendment 2), `DayModel`, Now card, Today bars, links. | Assign works against a read server with `--timesheet` |
 | `tray-reminders` | Both reminders as app notifications. | |
 | `tray-settings` | Settings window, start at login. | |

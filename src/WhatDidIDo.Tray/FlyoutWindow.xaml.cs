@@ -1,6 +1,7 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Windows.Graphics;
 using WhatDidIDo.Tray.Core.Models;
@@ -26,6 +27,10 @@ public sealed partial class FlyoutWindow : Window
     private double _scale = 1;
     private bool _pulsing;
     private bool _destroying;
+    private PopoverView? _view;
+    private bool _syncingSlider;
+    private bool _sliderDragging;
+    private readonly DispatcherTimer _keyCommit = new() { Interval = TimeSpan.FromMilliseconds(600) };
 
     /// <summary>A start, pause, resume or stop from the primary button or "Stop now".</summary>
     public event EventHandler<string>? CommandRequested;
@@ -35,6 +40,24 @@ public sealed partial class FlyoutWindow : Window
 
     /// <summary>The flyout was shown (true) or hidden (false).</summary>
     public event EventHandler<bool>? OpenChanged;
+
+    /// <summary>The Microphone tile asks for this state.</summary>
+    public event EventHandler<bool>? MicToggleRequested;
+
+    /// <summary>A source picked in the input picker.</summary>
+    public event EventHandler<MicSource>? MicChosen;
+
+    /// <summary>The input picker opens ("input") or closes (null).</summary>
+    public event EventHandler<string?>? ExpandRequested;
+
+    /// <summary>The PHI guard tile was clicked.</summary>
+    public event EventHandler? PhiRequested;
+
+    /// <summary>The slider shows another stop (a drag, or a key step not yet committed).</summary>
+    public event EventHandler<int>? IntervalChanging;
+
+    /// <summary>Commit this stop: a drag ended, 600 ms passed after the last key step, or the flyout closed meanwhile.</summary>
+    public event EventHandler<int>? IntervalCommitted;
 
     public FlyoutWindow()
     {
@@ -69,6 +92,46 @@ public sealed partial class FlyoutWindow : Window
             Hide();
         };
         Root.SizeChanged += (_, _) => Place();
+
+        // A pointer drag commits on release; the slider handles the pointer
+        // events itself, so listen to handled ones too.
+        IntervalSlider.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
+        {
+            _keyCommit.Stop();
+            _sliderDragging = true;
+        }), handledEventsToo: true);
+        IntervalSlider.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => EndDrag()), handledEventsToo: true);
+        IntervalSlider.PointerCaptureLost += (_, _) => EndDrag();
+        _keyCommit.Tick += (_, _) => CommitInterval();
+    }
+
+    private int SliderIndex => (int)Math.Round(IntervalSlider.Value);
+
+    private void EndDrag()
+    {
+        if (!_sliderDragging)
+            return;
+        _sliderDragging = false;
+        CommitInterval();
+    }
+
+    private void CommitInterval()
+    {
+        _keyCommit.Stop();
+        IntervalCommitted?.Invoke(this, SliderIndex);
+    }
+
+    private void IntervalSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_syncingSlider || _view is not { Interval.Sensitive: true })
+            return;
+        IntervalChanging?.Invoke(this, SliderIndex);
+        // Keyboard steps commit after a pause; a drag commits on release.
+        if (!_sliderDragging)
+        {
+            _keyCommit.Stop();
+            _keyCommit.Start();
+        }
     }
 
     public bool IsOpen { get; private set; }
@@ -115,6 +178,12 @@ public sealed partial class FlyoutWindow : Window
             return;
         IsOpen = false;
         HiddenAt = Environment.TickCount64;
+        // A pending interval change is committed, not dropped (POPOVER.md Amendment 2.2).
+        if (_keyCommit.IsEnabled || _sliderDragging)
+        {
+            _sliderDragging = false;
+            CommitInterval();
+        }
         AppWindow.Hide();
         UpdatePulse();
         OpenChanged?.Invoke(this, false);
@@ -185,9 +254,14 @@ public sealed partial class FlyoutWindow : Window
             PrimaryButton.Visibility = Visibility.Collapsed;
         }
 
+        _view = view;
         Notices.Children.Clear();
         foreach (var text in view.Notices)
             Notices.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Warning, Message = text });
+
+        RenderTiles(view.Tiles);
+        RenderInput(view.Input);
+        RenderInterval(view.Interval);
 
         var footer = view.Footer;
         FooterBar.Visibility = Show(footer.Visible);
@@ -201,6 +275,129 @@ public sealed partial class FlyoutWindow : Window
         _pulsing = status.Pulse;
         UpdatePulse();
     }
+
+    private sealed record TileParts(ButtonBase Button, FontIcon Glyph, TextBlock Title, TextBlock Subtitle);
+
+    private TileParts? _micTile, _phiTile, _windowTile;
+    private IReadOnlyList<InputItem> _shownSources = [];
+
+    // A Quick Settings tile: glyph, then title over subtitle. Toggle tiles take
+    // the accent fill when checked from the toggle button's own style.
+    private static TileParts MakeTile(ButtonBase button)
+    {
+        var glyph = new FontIcon { FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
+        var title = new TextBlock { Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"], TextTrimming = TextTrimming.CharacterEllipsis };
+        // The caption style wraps; a tile keeps one line and ellipsizes (the tooltip has the rest).
+        var subtitle = new TextBlock
+        {
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(title);
+        text.Children.Add(subtitle);
+        var grid = new Grid { ColumnSpacing = 10 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.Children.Add(glyph);
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+        button.Content = grid;
+        button.HorizontalAlignment = HorizontalAlignment.Stretch;
+        button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        button.Padding = new Thickness(12, 8, 12, 8);
+        button.MinHeight = 56;
+        button.CornerRadius = new CornerRadius(8);
+        return new TileParts(button, glyph, title, subtitle);
+    }
+
+    private void RenderTiles(Tiles tiles)
+    {
+        if (_micTile is null)
+        {
+            _micTile = MakeTile(new ToggleButton());
+            _micTile.Button.Click += (_, _) =>
+            {
+                var on = _view?.Tiles.Mic.On == true;
+                // Show the session's truth until it changes; the controller decides.
+                ((ToggleButton)_micTile.Button).IsChecked = on;
+                MicToggleRequested?.Invoke(this, !on);
+            };
+            _phiTile = MakeTile(new Button());
+            _phiTile.Button.Click += (_, _) => PhiRequested?.Invoke(this, EventArgs.Empty);
+            _phiTile.Subtitle.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"];
+            // Reports only (TRAY.md T8): looks like a tile, takes no input.
+            _windowTile = MakeTile(new ToggleButton { IsHitTestVisible = false, IsTabStop = false });
+        }
+
+        TilesGrid.Visibility = Show(tiles.Visible);
+        TilesGrid.Children.Clear();
+        TilesGrid.RowDefinitions.Clear();
+        var shown = new List<(TileParts Parts, Tile Tile)> { (_micTile, tiles.Mic), (_phiTile!, tiles.Phi), (_windowTile!, tiles.Window) }
+            .Where(t => t.Tile.Visible).ToList();
+        for (var i = 0; i < shown.Count; i++)
+        {
+            var (parts, tile) = shown[i];
+            parts.Glyph.Glyph = tile.Glyph;
+            parts.Title.Text = tile.Title;
+            parts.Subtitle.Text = tile.Subtitle;
+            parts.Button.IsEnabled = tile.Sensitive || !tile.Interactive;
+            parts.Button.Opacity = tile.Sensitive ? 1 : 0.6;
+            if (parts.Button is ToggleButton toggle)
+                toggle.IsChecked = tile.On;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parts.Button, tile.AccessibleName);
+            ToolTipService.SetToolTip(parts.Button, tile.Subtitle);
+            if (i % 2 == 0)
+                TilesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(parts.Button, i / 2);
+            Grid.SetColumn(parts.Button, i % 2);
+            TilesGrid.Children.Add(parts.Button);
+        }
+    }
+
+    private void RenderInput(InputBlock input)
+    {
+        InputBlock.Visibility = Show(input.Visible);
+        InputValue.Text = input.Value;
+        InputChevron.Glyph = input.Expanded ? "" : "";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(InputButton, input.AccessibleName);
+        InputList.Visibility = Show(input.Expanded);
+        InputEmpty.Text = input.EmptyText ?? "";
+        InputEmpty.Visibility = Show(input.EmptyText is not null);
+
+        // Rebuild the radio buttons only when the sources change, so focus stays put.
+        if (!input.Items.SequenceEqual(_shownSources))
+        {
+            _shownSources = input.Items;
+            while (InputList.Children.Count > 1)
+                InputList.Children.RemoveAt(1);
+            foreach (var item in input.Items)
+            {
+                var radio = new RadioButton { Content = item.Label, IsChecked = item.Checked, GroupName = "wdi-input" };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(radio, item.Label);
+                var source = item.Source;
+                radio.Click += (_, _) => MicChosen?.Invoke(this, source);
+                InputList.Children.Add(radio);
+            }
+        }
+    }
+
+    private void RenderInterval(IntervalBlock interval)
+    {
+        IntervalBlock.Visibility = Show(interval.Visible);
+        IntervalValue.Text = interval.Value;
+        IntervalSlider.IsEnabled = interval.Sensitive;
+        if (!_sliderDragging && SliderIndex != interval.Index)
+        {
+            _syncingSlider = true;
+            IntervalSlider.Value = interval.Index;
+            _syncingSlider = false;
+        }
+    }
+
+    private void InputButton_Click(object sender, RoutedEventArgs e) =>
+        ExpandRequested?.Invoke(this, _view?.Input.Expanded == true ? null : "input");
 
     private void UpdatePulse()
     {
