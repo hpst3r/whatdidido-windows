@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WhatDidIDo.Tray.Core/WhatDidIDo.Tray.Core.csproj" />
+    <Project Path="src/WhatDidIDo.Tray/WhatDidIDo.Tray.csproj">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WhatDidIDo.Tray.Core.Tests/WhatDidIDo.Tray.Core.Tests.csproj" />
+  </Folder>
+</Solution>

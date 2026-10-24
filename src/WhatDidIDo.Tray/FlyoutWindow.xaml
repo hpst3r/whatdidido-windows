@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="WhatDidIDo.Tray.FlyoutWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="whatdidido">
+    <Window.SystemBackdrop>
+        <DesktopAcrylicBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="Root" Width="360" VerticalAlignment="Top" KeyDown="Root_KeyDown">
+        <Grid.Resources>
+            <Storyboard x:Name="PulseStoryboard" RepeatBehavior="Forever">
+                <DoubleAnimationUsingKeyFrames Storyboard.TargetName="RecordingDot" Storyboard.TargetProperty="Opacity">
+                    <LinearDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                    <LinearDoubleKeyFrame KeyTime="0:0:1.2" Value="0.45" />
+                    <LinearDoubleKeyFrame KeyTime="0:0:2.4" Value="1" />
+                </DoubleAnimationUsingKeyFrames>
+            </Storyboard>
+        </Grid.Resources>
+
+        <StackPanel x:Name="Body" Padding="12,12,12,4" Spacing="8">
+            <!-- Header -->
+            <Grid Padding="4,0,0,0" Height="32">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Image Width="18" Height="18">
+                        <Image.Source>
+                            <SvgImageSource UriSource="ms-appx:///Assets/whatdidido.svg" RasterizePixelWidth="36" RasterizePixelHeight="36" />
+                        </Image.Source>
+                    </Image>
+                    <TextBlock Text="whatdidido" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Status card -->
+            <Border x:Name="StatusCard" CornerRadius="8" Padding="16,14" BorderThickness="1"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid Width="20" VerticalAlignment="Center">
+                        <Ellipse x:Name="RecordingDot" Width="12" Height="12" Fill="{ThemeResource SystemFillColorCriticalBrush}" Visibility="Collapsed" />
+                        <Rectangle x:Name="PausedMark" Width="12" Height="12" RadiusX="3" RadiusY="3" Fill="{ThemeResource SystemFillColorCautionBrush}" Visibility="Collapsed" />
+                        <Ellipse x:Name="IdleDot" Width="12" Height="12" Fill="{ThemeResource TextFillColorDisabledBrush}" Visibility="Collapsed" />
+                        <FontIcon x:Name="StatusGlyph" FontSize="20" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Grid>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="StatusTitle" Style="{StaticResource SubtitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="StatusSubtitle" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <Button x:Name="PrimaryButton" Grid.Column="2" Width="40" Height="40" CornerRadius="20" Padding="0"
+                            VerticalAlignment="Center" Click="PrimaryButton_Click">
+                        <FontIcon x:Name="PrimaryGlyph" FontSize="16" />
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- Notices -->
+            <StackPanel x:Name="Notices" Spacing="8" />
+
+            <!-- Footer -->
+            <Border BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="-12,4,-12,0" Padding="16,6,8,6"
+                    x:Name="FooterBar">
+                <Grid MinHeight="32">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="FooterText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                        <HyperlinkButton x:Name="StopButton" Content="Stop session" Click="StopButton_Click"
+                                         Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <Button x:Name="CancelStopButton" Content="Cancel" Click="CancelStopButton_Click" Visibility="Collapsed" />
+                        <Button x:Name="ConfirmStopButton" Content="Stop now" Click="ConfirmStopButton_Click" Visibility="Collapsed">
+                            <!-- Lightweight styling: the critical fill in every state, as an accent button would be. -->
+                            <Button.Resources>
+                                <StaticResource x:Key="ButtonBackground" ResourceKey="SystemFillColorCriticalBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SystemFillColorCriticalBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SystemFillColorCriticalBrush" />
+                                <StaticResource x:Key="ButtonForeground" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="TextOnAccentFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ButtonBorderBrush" ResourceKey="AccentControlElevationBorderBrush" />
+                                <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="AccentControlElevationBorderBrush" />
+                            </Button.Resources>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </Grid>
+</Window>
