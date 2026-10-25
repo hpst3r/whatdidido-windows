@@ -18,6 +18,8 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+        // The tray outlives every window (closing Settings must not end it); only Quit does.
+        DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
         UnhandledException += (_, e) =>
         {
             Native.TrayLog.Write($"unhandled: {e.Exception.GetType().Name}: {e.Exception.HResult:X8}");

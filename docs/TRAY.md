@@ -1,6 +1,6 @@
 # Windows tray control (contract)
 
-Status: draft 2026-10-24; slices `tray-core`, `tray-popover`, `tray-app` and `tray-reminders` written (section 7). Later
+Status: draft 2026-10-24; slices `tray-core`, `tray-popover`, `tray-app`, `tray-reminders` and `tray-settings` written (section 7). Later
 changes are numbered amendments at the end.
 
 Goal: the Windows counterpart of the GNOME top-bar extension
@@ -70,7 +70,7 @@ to the app server, exactly as the extension does. This is whatdidido
    microphone on`.
 4. Left click or Enter toggles the flyout. Right click opens a small context
    menu: the primary action (Start, Pause or Resume), Open session page,
-   Settings (with `tray-settings`), Quit.
+   Settings, Quit.
 5. After Explorer restarts (`TaskbarCreated`) the icon is added again.
 
 ## 4. Flyout
@@ -160,13 +160,38 @@ and leaving the state removes it.
 
 ## 6. Settings
 
-The extension's keys (README "Settings"), in camelCase: `pollActive` (2),
-`pollIdle` (10), `microphoneStableId`, `microphoneId`, `microphoneLabel`,
-`showMicIndicator` (true), `pauseReminderMinutes` (10), `micReminderMinutes`
-(10), `appUrl` (empty). Not ported: `report-active-window` and
-`window-title-excluded-apps` (T8). Plus `startAtLogin` (false), written as
+The extension's keys (README "Settings"), in camelCase, with its ranges:
+`pollActive` (2, 1..60), `pollIdle` (10, 2..3600), `microphoneStableId`,
+`microphoneId`, `microphoneLabel`, `showMicIndicator` (true),
+`pauseReminderMinutes` (10, 0..240), `micReminderMinutes` (10, 0..240),
+`appUrl` (empty). Not ported: `report-active-window` and
+`window-title-excluded-apps` (T8). A key missing from the file keeps its
+default; a value out of range falls back to it.
+
+**The settings window** (slice `tray-settings`) opens from the flyout
+header's Settings button and the tray menu; one window, brought to the front
+if open. It is laid out like Windows 11 Settings (Mica, cards with a glyph,
+title and description, the control on the right) and has the extension's
+groups and texts: General (start at login, show microphone indicator),
+Polling, Reminders, Microphone (the chosen one, Forget microphone) and App
+server (the URL with Apply; empty is automatic, an address that is not local
+is saved as typed so the flyout says so, as the extension does). Every
+change applies at once and the window follows changes made elsewhere (a
+microphone picked in the flyout). Closing it never ends the tray
+(`DispatcherShutdownMode.OnExplicitShutdown`).
+
+**Start at login** is the value
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\whatdidido-windows`
-only when the user turns it on in Settings.
+(the executable, quoted), written only when the user turns it on and
+deleted when they turn it off; nothing machine-wide. It is not a settings
+key: the registry is the state, so the window shows what Windows will do.
+Task Manager's Startup apps can turn it off
+(`Explorer\StartupApproved\Run`, first byte odd); the window then says so,
+and turning it on here clears that mark. A Run value that starts another
+copy of the tray shows as off ("Another copy of the tray starts at login")
+and turning it on points it at this one. Debug builds take
+`WHATDIDIDO_TRAY_STARTUP_KEY` to use another HKCU key, so checks never touch
+the real entries.
 
 ## 7. Slices
 
@@ -176,7 +201,7 @@ only when the user turns it on in Settings.
 | `tray-popover` (written) | `MicModel` and `MicController` (`mic_model.js`, issue #1 rules), `ControlClient.SetMicOnAsync` and the typed inventory, `PopoverModel` tiles, input picker and interval, `SettingsStore` (section 6). App: the tiles, the input picker, the slider. | done live against a stateful fake of `/control/v1` (Windows sessions have no audio yet): the issue #1 prompt, a pick that turns the mic on, a switch while live, off and on with the saved choice, a disconnected choice that sends nothing; slider by drag, click and keys |
 | `tray-app` (written) | `AppClient` and `AppUrls` (POPOVER.md section 3 and Amendments 1 and 2: discovery from the session's `/day` redirect, the `appUrl` override, no redirects, the error envelope), `TimesheetDay`, `DayModel` (day.ts, palette.ts with the `win` skin's colors), `PopoverModel` Now, Today, Open and the links; request bodies written without reflection (`JsonBody`). App: the Now card with Assign, the Today bars, Open whatdidido, the PHI tile's link. | done live against a real read server with `--timesheet` (discovery through a real session's `/day`, the day, an Assign the server stored, a refused body); the flyout driven headless with UI Automation against a fake app server (Now card, bars, ticket pick, Assign, a `409 conflict`) |
 | `tray-reminders` (written) | `MicReminder` (`mic_reminder.js`), `ReminderNotice` (texts, buttons, argument encoding), the app's `Notifications` over `Windows.UI.Notifications`, the controller's timers and button actions, `tray.log`. | done live with the delays at 1 minute against a stateful fake, read from the notification platform's own database (`wpndatabase.db`): the mic reminder shown with its buttons after a minute of recording with the mic on, withdrawn by a pause, the pause reminder a minute later, its repeat replacing it, withdrawn by a resume, a reminder left by a killed tray removed at the next start; the shell registered the tray with toasts and banners on. Not seen: a banner on screen, and a button click (open point e) |
-| `tray-settings` | Settings window, start at login. | |
+| `tray-settings` (written) | `StartAtLogin` (Run and StartupApproved rules, tested against a fake registry), the extension's ranges, settable settings properties (a partial file kept 0/false before), `SettingsWindow`, the flyout's Settings button and the menu item. | driven live with UI Automation against a stateful fake and a private HKCU test key: defaults and values loaded, start at login on (the Run value written) and off (deleted), a Task Manager "disabled" mark shown and cleared, numbers, the indicator and Forget microphone saved, an invalid and a valid App server URL, closing the window kept the tray running |
 | `tray-ci` | A `windows-latest` workflow: build, Core tests, a zipped self-contained folder as the artifact. | |
 
 ## 8. Open points

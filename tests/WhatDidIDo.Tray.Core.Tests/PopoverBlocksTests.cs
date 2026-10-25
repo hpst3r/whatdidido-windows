@@ -132,6 +132,18 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void MissingKeys_KeepTheirDefaults()
+    {
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "settings.json");
+        File.WriteAllText(path, """{"microphoneStableId": "alsa_input.usb", "microphoneLabel": "USB headset"}""");
+        var s = new SettingsStore(path).Current;
+        Assert.Equal(new TraySettings { MicrophoneStableId = "alsa_input.usb", MicrophoneLabel = "USB headset" }, s);
+        Assert.True(s.ShowMicIndicator);
+        Assert.Equal((10, 10), (s.PauseReminderMinutes, s.MicReminderMinutes));
+    }
+
+    [Fact]
     public void BadValues_FallBackToDefaults()
     {
         Directory.CreateDirectory(_dir);

@@ -6,7 +6,7 @@ counterpart of [whatdidido-gnome](https://github.com/hpst3r/whatdidido-gnome).
 It talks to the work session's local control API (`/control/v1/*`), found
 through `%LOCALAPPDATA%\whatdidido\control.json`.
 
-Status: pre-alpha, slices `tray-core`, `tray-popover`, `tray-app` and `tray-reminders` of [docs/TRAY.md](docs/TRAY.md).
+Status: pre-alpha, slices `tray-core` through `tray-settings` of [docs/TRAY.md](docs/TRAY.md).
 
 - **Tray icon:** a glyph per state (recording in red, paused in amber,
   stopped, starting/stopping, reconnecting, failed, not running), in the
@@ -24,7 +24,7 @@ Status: pre-alpha, slices `tray-core`, `tray-popover`, `tray-app` and `tray-remi
   entry), the **Today** bars (one per 15 minutes, colored by ticket; click
   one to open the Timeline there) and **Open whatdidido**. Acrylic, rounded,
   in your accent color, light or dark; Escape or a click elsewhere closes it.
-- **Menu** (right click): the primary action, Open session page, Quit.
+- **Menu** (right click): the primary action, Open session page, Settings, Quit.
 
 Polling: every 2 s while the flyout is open or the session is busy, else
 every 10 s; also when the flyout opens.
@@ -39,9 +39,16 @@ picking one saves it and turns it on. A saved choice that is not connected
 leaves the tile off with "<name> is not connected". Picking another source
 while the microphone is on switches to it. Polling never turns it on or off.
 
-Settings live in `%LOCALAPPDATA%\whatdidido-windows\settings.json` (the
-extension's keys in camelCase; TRAY.md section 6). There is no settings
-window yet.
+## Settings
+
+**Settings** in the flyout's header or the tray menu opens a window like
+Windows 11 Settings: start at login, the microphone indicator, the poll
+intervals, the reminder delays, the chosen microphone (with **Forget
+microphone**) and the App server URL. Changes apply at once. They are kept
+in `%LOCALAPPDATA%\whatdidido-windows\settings.json` (the extension's keys
+in camelCase; TRAY.md section 6), except start at login, which is your
+`HKCU\...\CurrentVersion\Run` entry `whatdidido-windows` (Task Manager's
+Startup apps can turn it off too; the window shows that).
 
 ## App server
 
@@ -83,7 +90,7 @@ under `HKCU\Software\Classes\AppUserModelId` when it starts (that key can
 be deleted after removing the tray). Errors go to
 `%LOCALAPPDATA%\whatdidido-windows	ray.log`.
 
-Still to come (TRAY.md section 7): a settings window and start at login.
+Still to come (TRAY.md section 7): a CI workflow and a packaged build.
 
 ## Build and run
 

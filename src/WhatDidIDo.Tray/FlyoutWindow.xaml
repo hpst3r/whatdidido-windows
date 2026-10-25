@@ -30,6 +30,11 @@
                     </Image>
                     <TextBlock Text="whatdidido" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
                 </StackPanel>
+                <Button x:Name="SettingsButton" HorizontalAlignment="Right" Width="32" Height="32" Padding="0" CornerRadius="16"
+                        Background="Transparent" BorderThickness="0" Click="SettingsButton_Click"
+                        AutomationProperties.Name="Settings" ToolTipService.ToolTip="Settings">
+                    <FontIcon Glyph="&#xE713;" FontSize="14" />
+                </Button>
             </Grid>
 
             <!-- Status card -->

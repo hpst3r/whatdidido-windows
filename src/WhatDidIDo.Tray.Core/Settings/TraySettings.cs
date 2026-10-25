@@ -6,20 +6,28 @@ namespace WhatDidIDo.Tray.Core.Settings;
 
 /// <summary>
 /// The tray's settings (TRAY.md section 6): the extension's keys in camelCase.
-/// Never the control token.
+/// Never the control token. Start at login is not here: its state is the
+/// registry's Run value (<see cref="StartAtLogin"/>).
 /// </summary>
 public sealed record TraySettings
 {
-    public int PollActive { get; init; } = 2;
-    public int PollIdle { get; init; } = 10;
-    public string MicrophoneStableId { get; init; } = "";
-    public string MicrophoneId { get; init; } = "";
-    public string MicrophoneLabel { get; init; } = "";
-    public bool ShowMicIndicator { get; init; } = true;
-    public int PauseReminderMinutes { get; init; } = PauseReminder.DefaultMinutes;
-    public int MicReminderMinutes { get; init; } = 10;
-    public string AppUrl { get; init; } = "";
-    public bool StartAtLogin { get; init; }
+    // Settable, not init-only: the JSON source generator fills init-only
+    // properties through an object initializer, so a key missing from the file
+    // would come out as 0/false/null instead of keeping the default below.
+    public int PollActive { get; set; } = 2;
+    public int PollIdle { get; set; } = 10;
+    public string MicrophoneStableId { get; set; } = "";
+    public string MicrophoneId { get; set; } = "";
+    public string MicrophoneLabel { get; set; } = "";
+    public bool ShowMicIndicator { get; set; } = true;
+    public int PauseReminderMinutes { get; set; } = PauseReminder.DefaultMinutes;
+    public int MicReminderMinutes { get; set; } = 10;
+    public string AppUrl { get; set; } = "";
+
+    // The extension's GSettings ranges (whatdidido-gnome schemas/*.gschema.xml).
+    public const int PollActiveMin = 1, PollActiveMax = 60;
+    public const int PollIdleMin = 2, PollIdleMax = 3600;
+    public const int ReminderMinutesMax = PauseReminder.MaxMinutes;
 
     /// <summary>Out-of-range or missing values fall back to their defaults, as GSettings ranges do.</summary>
     public TraySettings Normalized()
@@ -27,8 +35,8 @@ public sealed record TraySettings
         var d = new TraySettings();
         return this with
         {
-            PollActive = PollActive is >= 1 and <= 60 ? PollActive : d.PollActive,
-            PollIdle = PollIdle is >= 1 and <= 600 ? PollIdle : d.PollIdle,
+            PollActive = PollActive is >= PollActiveMin and <= PollActiveMax ? PollActive : d.PollActive,
+            PollIdle = PollIdle is >= PollIdleMin and <= PollIdleMax ? PollIdle : d.PollIdle,
             MicrophoneStableId = MicrophoneStableId ?? "",
             MicrophoneId = MicrophoneId ?? "",
             MicrophoneLabel = MicrophoneLabel ?? "",

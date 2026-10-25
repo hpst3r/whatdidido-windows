@@ -15,7 +15,7 @@ namespace WhatDidIDo.Tray;
 /// </summary>
 internal sealed class TrayController : IDisposable
 {
-    private const int MenuPrimary = 1, MenuOpenSession = 2, MenuQuit = 9;
+    private const int MenuPrimary = 1, MenuOpenSession = 2, MenuSettings = 3, MenuQuit = 9;
     private static readonly TimeSpan StopConfirmFor = TimeSpan.FromSeconds(4);
 
     private readonly ControlClient _client;
@@ -33,6 +33,9 @@ internal sealed class TrayController : IDisposable
     private readonly DispatcherQueueTimer _pauseTimer;
     private readonly DispatcherQueueTimer _micTimer;
     private readonly MicController _mic;
+    private readonly StartAtLogin _startAtLogin;
+    private SettingsWindow? _settingsWindow;
+    private string _shownAppUrl;
     private readonly AppClient _app;
     private readonly AppIcons _icons = new();
     private readonly DispatcherQueueTimer _dayTimer;
@@ -107,6 +110,8 @@ internal sealed class TrayController : IDisposable
         _notifications.Invoked += (_, hit) => OnReminderAction(hit.Kind, hit.Action);
         _notifications.Opened += (_, _) => ShowFlyout();
 
+        _startAtLogin = new StartAtLogin(new StartupRegistry(), Environment.ProcessPath ?? "whatdidido-tray.exe");
+        _shownAppUrl = settings.Current.AppUrl;
         _settings.Changed += (_, _) =>
         {
             var s = _settings.Current;
@@ -114,7 +119,16 @@ internal sealed class TrayController : IDisposable
                 ApplyReminder(ReminderKind.Pause, _pause.SetMinutes(s.PauseReminderMinutes, Now));
             if (s.MicReminderMinutes != _micReminder.Minutes)
                 ApplyReminder(ReminderKind.Mic, _micReminder.SetMinutes(s.MicReminderMinutes, Now));
+            if (s.AppUrl != _shownAppUrl)
+            {
+                // Another app server (or automatic discovery): forget the old one's day.
+                _shownAppUrl = s.AppUrl;
+                _appBase = null;
+                _day = null;
+                _ = LoadDay();
+            }
             Render();
+            Schedule();
         };
 
         _tray.Activated += (_, _) => ToggleFlyout();
@@ -134,6 +148,11 @@ internal sealed class TrayController : IDisposable
             Render();
         };
         _flyout.LinkRequested += (_, link) => OpenLink(link);
+        _flyout.SettingsRequested += (_, _) =>
+        {
+            _flyout.Hide();
+            ShowSettings();
+        };
         _flyout.TicketPicked += (_, ticket) =>
         {
             _ticket = ticket;
@@ -197,6 +216,7 @@ internal sealed class TrayController : IDisposable
         _pauseTimer.Stop();
         _micTimer.Stop();
         _notifications.Dispose();
+        _settingsWindow?.Close();
         _tray.Dispose();
         _app.Dispose();
         _flyout.Destroy();
@@ -249,6 +269,17 @@ internal sealed class TrayController : IDisposable
         }
     }
 
+    /// <summary>Opens the settings window, or brings the open one to the front.</summary>
+    private void ShowSettings()
+    {
+        if (_settingsWindow is null)
+        {
+            _settingsWindow = new SettingsWindow(_settings, _startAtLogin, LogOnce);
+            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        }
+        _settingsWindow.Activate();
+    }
+
     private void ShowFlyout()
     {
         if (!_flyout.IsOpen)
@@ -278,6 +309,7 @@ internal sealed class TrayController : IDisposable
         [
             (MenuPrimary, label, primary is not null && !_commandBusy),
             (MenuOpenSession, "Open session page", _running),
+            (MenuSettings, "Settings", true),
             (0, null, false),
             (MenuQuit, "Quit whatdidido tray", true),
         ]);
@@ -285,6 +317,9 @@ internal sealed class TrayController : IDisposable
         {
             case MenuPrimary when primary is not null:
                 _ = RunCommand(primary);
+                break;
+            case MenuSettings:
+                ShowSettings();
                 break;
             case MenuOpenSession:
                 _ = OpenSessionPage();

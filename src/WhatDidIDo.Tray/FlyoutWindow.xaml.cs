@@ -42,6 +42,9 @@ public sealed partial class FlyoutWindow : Window
     /// <summary>The flyout was shown (true) or hidden (false).</summary>
     public event EventHandler<bool>? OpenChanged;
 
+    /// <summary>The header's Settings button.</summary>
+    public event EventHandler? SettingsRequested;
+
     /// <summary>The Microphone tile asks for this state.</summary>
     public event EventHandler<bool>? MicToggleRequested;
 
@@ -582,6 +585,8 @@ public sealed partial class FlyoutWindow : Window
         if (_view is { } v)
             LinkRequested?.Invoke(this, v.Open.Link);
     }
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke(this, EventArgs.Empty);
 
     private void InputButton_Click(object sender, RoutedEventArgs e) =>
         ExpandRequested?.Invoke(this, _view?.Input.Expanded == true ? null : "input");
