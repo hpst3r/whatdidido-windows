@@ -3,7 +3,12 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <!-- The WinUI component of Windows App SDK 2.5.1, not the metapackage: that one also brings
+         the AI, ML, Search and Widgets components (onnxruntime, DirectML), ~100 MB the tray never uses. -->
+    <PackageVersion Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.9" />
+    <!-- The versions the 2.5.1 metapackage pins (WinUI 2.3.9 asks for an unpublished 2.1.8). -->
+    <PackageVersion Include="Microsoft.WindowsAppSDK.Foundation" Version="2.3.12" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" />
     <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
     <PackageVersion Include="System.Drawing.Common" Version="10.0.11" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />

@@ -1,0 +1,82 @@
+---
+name: CI
+
+on:
+  push:
+    # Every branch, so each pushed commit is tested; push-run checks also show
+    # on pull requests.
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One live run per branch: a newer push cancels the superseded run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+
+jobs:
+  build:
+    # docs/TRAY.md slice tray-ci: the Core tests, then the tray published
+    # self-contained for x64 and ARM64 and zipped as artifacts.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install .NET (global.json)
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      - name: Restore (locked)
+        run: dotnet restore whatdidido-windows.slnx --locked-mode
+
+      - name: Test (Core)
+        run: >-
+          dotnet test tests/WhatDidIDo.Tray.Core.Tests -c Release --no-restore
+          --logger "trx;LogFileName=core.trx" --results-directory test-results
+
+      - name: Upload test results
+        if: ${{ !cancelled() && hashFiles('test-results/*.trx') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: test-results
+          path: test-results/*.trx
+          retention-days: 7
+
+      - name: Package (win-x64)
+        run: ./scripts/package.ps1 -Rid win-x64
+
+      - name: Package (win-arm64)
+        run: ./scripts/package.ps1 -Rid win-arm64
+
+      - name: Upload whatdidido-tray-win-x64
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: whatdidido-tray-win-x64
+          path: dist/whatdidido-tray-win-x64.zip
+          # Already a zip: storing it compressed again gains nothing.
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload whatdidido-tray-win-arm64
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: whatdidido-tray-win-arm64
+          path: dist/whatdidido-tray-win-arm64.zip
+          compression-level: 0
+          retention-days: 14

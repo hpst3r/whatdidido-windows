@@ -6,7 +6,7 @@ counterpart of [whatdidido-gnome](https://github.com/hpst3r/whatdidido-gnome).
 It talks to the work session's local control API (`/control/v1/*`), found
 through `%LOCALAPPDATA%\whatdidido\control.json`.
 
-Status: pre-alpha, slices `tray-core` through `tray-settings` of [docs/TRAY.md](docs/TRAY.md).
+Status: pre-alpha; all six slices of [docs/TRAY.md](docs/TRAY.md) are written.
 
 - **Tray icon:** a glyph per state (recording in red, paused in amber,
   stopped, starting/stopping, reconnecting, failed, not running), in the
@@ -90,7 +90,6 @@ under `HKCU\Software\Classes\AppUserModelId` when it starts (that key can
 be deleted after removing the tray). Errors go to
 `%LOCALAPPDATA%\whatdidido-windows	ray.log`.
 
-Still to come (TRAY.md section 7): a CI workflow and a packaged build.
 
 ## Build and run
 
@@ -102,6 +101,19 @@ dotnet test tests/WhatDidIDo.Tray.Core.Tests
 dotnet build src/WhatDidIDo.Tray -p:Platform=x64
 src\WhatDidIDo.Tray\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\whatdidido-tray.exe
 ```
+
+To build the folder people run, as CI does (`dist/whatdidido-tray-win-x64/`
+and its zip; `win-arm64` likewise):
+
+```powershell
+.\scripts\package.ps1 -Rid win-x64
+```
+
+The folder runs as copied, from anywhere: unzip it and start
+`whatdidido-tray.exe`. CI (`.github/workflows/ci.yml`) runs the Core tests
+and uploads both zips as artifacts. The SDK version is pinned in
+`global.json` and packages in `packages.lock.json`; after changing a
+package, run `dotnet restore --force-evaluate` and commit the lock files.
 
 Windows 11 puts a new tray icon in the overflow (`^`); drag it onto the
 taskbar to keep it visible. One instance runs per login.

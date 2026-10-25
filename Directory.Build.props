@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!-- packages.lock.json per project; CI restores in locked mode. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <Version>0.1.0</Version>
     <Authors>William Porter</Authors>
     <Copyright>AGPL-3.0-or-later</Copyright>
